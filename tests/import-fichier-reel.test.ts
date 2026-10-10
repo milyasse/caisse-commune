@@ -102,3 +102,21 @@ test('Feuille المصاريف : une dépense par semaine, contrôles et risque 
   const again = buildPreview(exp.grid, m, withLumps, TODAY);
   assert.ok(again.every((l) => l.warnings.some((w) => w.includes('double comptage'))));
 });
+
+test('Canevas pré-rempli (écrit par openpyxl, caractères encodés &#…;) : deux feuilles, solde 1 600 MAD', async () => {
+  const { readFileSync } = await import('node:fs');
+  const sheets = await readXlsx(new Uint8Array(readFileSync(new URL('./fixtures/canevas-donnees-reelles.xlsx', import.meta.url))));
+  assert.deepEqual(sheets.map((x) => x.name), ['Versements', 'Dépenses', "Mode d'emploi"]);
+  let s = emptyState(TODAY);
+  s.settings.openingDate = '2025-03-01';
+  for (const sh of sheets.slice(0, 2)) {
+    const m = guessMapping(sh.grid, s);
+    const lines = buildPreview(sh.grid, m, s, TODAY);
+    assert.equal(lines.filter((l) => l.errors.length).length, 0);
+    s = applyImport(s, ctx, lines).state;
+  }
+  assert.deepEqual(s.members.map((m) => m.name), ['امحمد', 'بوعزة', 'بنعاشير', 'موسى']);
+  assert.equal(s.payments.length, 77);
+  assert.equal(s.expenses.length, 20);
+  assert.equal(balanceAt(s, TODAY), 1600_00);
+});

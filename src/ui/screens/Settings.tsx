@@ -47,7 +47,7 @@ export function Settings({ period }: { period: Period }) {
           </button>
         ))}
       </div>
-      <p className="note">Caisse commune · version 0.1 · montants en MAD · dates JJ/MM/AAAA</p>
+      <p className="note">Caisse commune · version 0.3 · montants en MAD · dates JJ/MM/AAAA</p>
       {panel === 'membres' && <MembersPanel onClose={() => setPanel(null)} period={period} />}
       {panel === 'groupe' && <GroupPanel onClose={() => setPanel(null)} />}
       {panel === 'cloture' && <ClosurePanel onClose={() => setPanel(null)} />}

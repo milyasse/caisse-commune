@@ -165,7 +165,15 @@ export function buildXlsx(sheets: XSheet[]): Uint8Array {
 }
 
 // ------------------------------------------------------------------ XLSX lecture
-const unesc = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+const unesc = (s: string) =>
+  s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
 const colIndex = (ref: string) => {
   const letters = ref.replace(/\d+/g, '');
   let n = 0;

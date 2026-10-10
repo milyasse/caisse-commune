@@ -1,7 +1,7 @@
 // Service worker : l'application fonctionne hors ligne une fois chargée.
 // Stratégie : réseau d'abord pour les fichiers de l'app (mise à jour), cache en secours.
 // Les appels à Supabase ne sont jamais mis en cache.
-const CACHE = 'caisse-v3';
+const CACHE = 'caisse-v4';
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {

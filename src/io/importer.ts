@@ -272,7 +272,7 @@ export function buildPreview(grid: Grid, mapping: Mapping, s: AppState, today: I
       const get = (k: PaymentField) => (c[k] === undefined ? undefined : r[c[k]!]);
       if (isTotalRow(r) && !parseDateFR(get('date') as string)) return;
       const { date, fixed } = parseDateLoose(get('date'));
-      const l = pushPayment(rowNo, date, get('member'), parsePeriod(get('period'), date ? +date.slice(0, 4) : undefined), parseMAD(get('amount') as string), get('comment') ? String(get('comment')) : undefined);
+      const l = pushPayment(rowNo, date, get('member'), parsePeriod(get('period'), date ? +date.slice(0, 4) : undefined), parseMAD(get('amount') as string), get('comment') ? String(get('comment')) : undefined, true);
       if (fixed) l.warnings.push(`Date corrigée : ${fixed}`);
       return;
     }
