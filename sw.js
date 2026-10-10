@@ -2,7 +2,7 @@
 // Stratégie « stale-while-revalidate » : l'app s'ouvre instantanément depuis le cache,
 // puis la nouvelle version est téléchargée en arrière-plan (active à l'ouverture suivante).
 // Les appels à Supabase (autre origine) ne sont jamais mis en cache.
-const CACHE = 'caisse-v7';
+const CACHE = 'caisse-v8';
 const ASSETS = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
