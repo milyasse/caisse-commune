@@ -1,25 +1,48 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { useStore } from '../../store/store.ts';
-import { balanceAt, balanceSeries, contributionRows, monthSummary, yearSummary, allOperations } from '../../domain/finance.ts';
-import { addMonths, fmtDate, MONTHS_SHORT, periodLabel, periodMonth, periodYear, todayISO } from '../../domain/dates.ts';
+import { balanceAt, balanceSeries, contributionRows, monthSummary, yearSummary, allOperations, memberTotals } from '../../domain/finance.ts';
+import { addMonths, fmtDate, MONTHS_SHORT, periodLabel, periodMonth, periodOf, periodYear, todayISO } from '../../domain/dates.ts';
 import { formatMAD } from '../../domain/money.ts';
 import type { Period } from '../../domain/types.ts';
-import { BarChart, Card, Icon, Kpi, LineChart, Money, PeriodPicker } from '../components/kit.tsx';
+import { Card, Icon, Kpi, Money, PeriodPicker } from '../components/kit.tsx';
+import { BalanceLine, Donut, MemberProgress, MonthBars } from '../components/charts.tsx';
+import { categoryColor, colorOfMember } from '../colors.ts';
+
+const mlabel = (p: Period) => MONTHS_SHORT[periodMonth(p) - 1];
 import { OperationRow } from './History.tsx';
 
 export function Dashboard({ period, setPeriod, go }: { period: Period; setPeriod: (p: Period) => void; go: (tab: string, extra?: { member?: string }) => void }) {
   const { state: s } = useStore();
+  const [scope, setScope] = useState<'mois' | 'annee'>('mois');
   const today = todayISO();
+  const cur = periodOf(today);
+  const year = periodYear(period);
   const m = monthSummary(s, period, today);
   const prev = monthSummary(s, addMonths(period, -1), today);
-  const y = yearSummary(s, periodYear(period), today);
+  const y = yearSummary(s, year, today);
   const ytd = y.months.filter((x) => x.period <= period);
   const ytdReceived = ytd.reduce((a, x) => a + x.received, 0);
   const ytdExpenses = ytd.reduce((a, x) => a + x.expenses, 0);
   const balance = balanceAt(s, today);
-  const series = balanceSeries(s, period, 12);
-  const periodsUpTo = [...new Set(s.contributions.filter((c) => c.period <= period).map((c) => c.period))];
-  const lateAll = periodsUpTo.flatMap((p) => contributionRows(s, p, today).filter((r) => r.late));
+  const end = period <= cur && period > addMonths(cur, -12) ? cur : period;
+  const series = useMemo(() => balanceSeries(s, end, 12), [s, end]);
+  const lateAll = useMemo(() => {
+    const periodsUpTo = [...new Set(s.contributions.filter((c) => c.period <= period).map((c) => c.period))];
+    return periodsUpTo.flatMap((p) => contributionRows(s, p, today).filter((r) => r.late));
+  }, [s, period, today]);
+  const slices = useMemo(() => {
+    const scoped = s.expenses.filter((e) => e.status === 'valid' && (scope === 'mois' ? e.date.startsWith(period) : e.date.startsWith(String(year))));
+    return s.categories
+      .map((c) => ({ key: c.id, label: c.name, color: categoryColor(s, c.id), value: scoped.filter((e) => e.categoryId === c.id).reduce((a, e) => a + e.amount, 0) }))
+      .filter((x) => x.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [s, scope, period, year]);
+  const memberRows = useMemo(() => {
+    const upTo = year === periodYear(cur) ? today : `${year}-12-31`;
+    return memberTotals(s, `${year}-01-01`, upTo, today)
+      .rows.filter((r) => r.expected > 0)
+      .map((r) => ({ id: r.memberId, name: r.name, color: colorOfMember(s, r.memberId), paid: r.paidForPeriod, expected: r.expected, late: r.lateMonths }));
+  }, [s, year, cur, today]);
   const lateTotal = lateAll.reduce((a, r) => a + r.remaining, 0);
   const bigExpenses = s.expenses.filter((e) => e.status === 'valid' && e.date.startsWith(period) && e.amount >= s.settings.largeExpenseThreshold);
   const recent = allOperations(s).filter((o) => o.item.status === 'valid').slice(0, 5);
@@ -96,20 +119,44 @@ export function Dashboard({ period, setPeriod, go }: { period: Period; setPeriod
 
       <Card>
         <div className="card-h">
-          <h3>Cotisations et dépenses</h3>
-          <div className="legend">
-            <i className="lg-a" />
-            Encaissé <i className="lg-b" />
-            Dépenses
-          </div>
+          <h3>Encaissé vs dépenses — 12 mois</h3>
         </div>
-        <BarChart data={series.map((x) => ({ label: MONTHS_SHORT[periodMonth(x.period) - 1].slice(0, 3), a: x.received, b: x.expenses }))} />
+        <MonthBars data={series.map((x) => ({ period: x.period, label: mlabel(x.period).slice(0, 4), title: periodLabel(x.period), a: x.received, b: x.expenses }))} selected={period} onSelect={setPeriod} />
+        <p className="note">Touchez un mois pour l'afficher ; touchez la légende pour masquer une série.</p>
       </Card>
       <Card>
         <div className="card-h">
           <h3>Solde de fin de mois</h3>
         </div>
-        <LineChart data={series.map((x) => ({ label: MONTHS_SHORT[periodMonth(x.period) - 1].slice(0, 3), v: x.closing }))} />
+        <BalanceLine data={series.map((x) => ({ period: x.period, label: mlabel(x.period).slice(0, 4), title: periodLabel(x.period).toLowerCase(), v: x.closing }))} selected={period} onSelect={setPeriod} />
+        <p className="note">Glissez le doigt sur la courbe pour lire chaque fin de mois.</p>
+      </Card>
+
+      {memberRows.length > 0 && (
+        <Card>
+          <div className="card-h">
+            <h3>Cotisations {year} par membre</h3>
+            <button className="link" onClick={() => go('cotisations')}>
+              Détail
+            </button>
+          </div>
+          <MemberProgress rows={memberRows} />
+        </Card>
+      )}
+
+      <Card>
+        <div className="card-h">
+          <h3>Dépenses par catégorie</h3>
+          <div className="chart-tabs" role="tablist">
+            <button className={scope === 'mois' ? 'on' : ''} onClick={() => setScope('mois')} role="tab" aria-selected={scope === 'mois'}>
+              {mlabel(period)}
+            </button>
+            <button className={scope === 'annee' ? 'on' : ''} onClick={() => setScope('annee')} role="tab" aria-selected={scope === 'annee'}>
+              {year}
+            </button>
+          </div>
+        </div>
+        {slices.length ? <Donut slices={slices} title={scope === 'mois' ? periodLabel(period) : String(year)} /> : <p className="empty">Aucune dépense sur la période.</p>}
       </Card>
 
       <div className="card-h">

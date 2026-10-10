@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { run, useStore } from '../../store/store.ts';
 import { contributionRows, monthSummary, type ContributionRow } from '../../domain/finance.ts';
 import { cancelPayment, generateMonth, overrideExpected } from '../../domain/commands.ts';
@@ -7,17 +7,20 @@ import { formatMAD } from '../../domain/money.ts';
 import type { Payment, Period } from '../../domain/types.ts';
 import { Badge, Btn, Card, confirmDialog, Empty, errorMessage, Field, Icon, MoneyInput, PeriodPicker, Seg, Sheet, StatusBadge, toast } from '../components/kit.tsx';
 import { PaymentForm } from '../forms.tsx';
+import { MemberTotals } from './MemberTotals.tsx';
+import { isActiveOn, isOwedFor } from '../../domain/finance.ts';
 
 const METHOD: Record<string, string> = { especes: 'Espèces', virement: 'Virement', autre: 'Autre' };
 
 export function Contributions({ period, setPeriod }: { period: Period; setPeriod: (p: Period) => void }) {
   const { state: s } = useStore();
   const [view, setView] = useState<'cartes' | 'tableau'>('cartes');
+  const [top, setTop] = useState<'mois' | 'totaux'>('mois');
   const [open, setOpen] = useState<string | null>(null);
   const [payFor, setPayFor] = useState<string | null>(null);
-  const rows = contributionRows(s, period, todayISO());
+  const rows = useMemo(() => contributionRows(s, period, todayISO()), [s, period]);
   const m = monthSummary(s, period);
-  const missing = s.members.filter((mm) => mm.active && !rows.some((r) => r.contribution.memberId === mm.id)).length;
+  const missing = s.members.filter((mm) => isOwedFor(mm, period) && !rows.some((r) => r.contribution.memberId === mm.id)).length;
   const closed = !!m.closure;
 
   const generate = () => {
@@ -36,8 +39,18 @@ export function Contributions({ period, setPeriod }: { period: Period; setPeriod
 
   const current = rows.find((r) => r.contribution.id === open);
 
+  const topSeg = <div className="top-seg"><Seg value={top} onChange={setTop} options={[['mois', 'Par mois'], ['totaux', 'Totaux par membre']]} /></div>;
+  if (top === 'totaux')
+    return (
+      <div className="screen">
+        {topSeg}
+        <MemberTotals period={period} />
+      </div>
+    );
+
   return (
     <div className="screen">
+      {topSeg}
       <PeriodPicker value={period} onChange={setPeriod} />
       <div className="meta-line">
         <span>
@@ -158,7 +171,7 @@ export function Contributions({ period, setPeriod }: { period: Period; setPeriod
           </table>
         </div>
       )}
-      {rows.length === 0 && missing === 0 && <Empty>Aucun membre actif. Ajoutez des membres dans Paramètres.</Empty>}
+      {rows.length === 0 && missing === 0 && <Empty>{s.members.some((mm) => isActiveOn(mm)) ? 'Aucune cotisation due ce mois-ci.' : 'Aucun membre actif. Ajoutez des membres dans Paramètres.'}</Empty>}
 
       <p className="note">
         « Versé » compte les versements rattachés à ce mois, même s'ils ont été encaissés plus tard. L'argent n'entre en caisse qu'à sa date réelle d'encaissement.

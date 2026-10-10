@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { run, useStore } from '../store/store.ts';
 import { addExpense, addPayment, DomainError, updateExpense, updatePayment, type ExpenseInput } from '../domain/commands.ts';
-import { contributionRows, paidFor } from '../domain/finance.ts';
+import { contributionRows, isActiveOn, isWaived, paidFor } from '../domain/finance.ts';
 import { fmtDate, periodLabel, periodOf, todayISO } from '../domain/dates.ts';
 import { formatMAD } from '../domain/money.ts';
 import type { AppState, Expense, Payment, PayMethod } from '../domain/types.ts';
@@ -41,13 +41,13 @@ export async function attempt(fn: (allowDuplicate: boolean) => (s: AppState) => 
 /** Mois non soldés d'un membre (le plus ancien d'abord) — proposé par défaut. */
 function openContributions(s: AppState, memberId: string) {
   return s.contributions
-    .filter((c) => c.memberId === memberId && paidFor(s, c.id) < c.expected)
+    .filter((c) => c.memberId === memberId && paidFor(s, c.id) < c.expected && !isWaived(s, c))
     .sort((a, b) => a.period.localeCompare(b.period));
 }
 
 export function PaymentForm({ contributionId, memberId: initialMember, edit, onDone }: { contributionId?: string; memberId?: string; edit?: Payment; onDone: () => void }) {
   const { state: s } = useStore();
-  const active = s.members.filter((m) => m.active || m.id === initialMember);
+  const active = s.members.filter((m) => isActiveOn(m) || m.id === initialMember);
   const pre = contributionId ? s.contributions.find((c) => c.id === contributionId) : undefined;
   const [memberId, setMemberId] = useState(edit?.memberId ?? pre?.memberId ?? initialMember ?? active[0]?.id ?? '');
   const open = useMemo(() => openContributions(s, memberId), [s, memberId]);

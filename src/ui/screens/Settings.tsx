@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { backupJson, clearAll, configureSupabase, hashPin, resetDemo, restoreJson, run, startReal, syncNow, useStore } from '../../store/store.ts';
 import { addCategory, addMember, closeMonth, reopenMonth, setMemberAmount, updateMember, updateSettings } from '../../domain/commands.ts';
-import { amountFor, contributionRows, memberStats, monthSummary } from '../../domain/finance.ts';
+import { amountFor, contributionRows, isActiveOn, memberStats, monthSummary } from '../../domain/finance.ts';
 import { addMonths, fmtDate, periodLabel, periodOf, periodStart, periodYear, todayISO } from '../../domain/dates.ts';
 import { formatMAD } from '../../domain/money.ts';
 import type { Member, Period } from '../../domain/types.ts';
@@ -13,6 +13,7 @@ import { signIn } from '../../store/supabase.ts';
 import { PREVIEW, printHtml, saveFile } from '../download.ts';
 import { Badge, Btn, Card, confirmDialog, DateInput, Empty, errorMessage, Field, Icon, MoneyInput, Sheet, StatusBadge, toast } from '../components/kit.tsx';
 import { AuditTrail } from './History.tsx';
+import { MemberLeave, MemberStatusBadge } from '../member-leave.tsx';
 
 type Panel = null | 'groupe' | 'membres' | 'categories' | 'cloture' | 'exports' | 'import' | 'sauvegarde' | 'sync' | 'utilisateur' | 'audit';
 
@@ -20,7 +21,7 @@ export function Settings({ period }: { period: Period }) {
   const { state: s, sync, session, supabase } = useStore();
   const [panel, setPanel] = useState<Panel>(null);
   const items: [Panel, string, string, string][] = [
-    ['membres', 'users', 'Membres', `${s.members.filter((m) => m.active).length} actif(s) sur ${s.members.length}`],
+    ['membres', 'users', 'Membres', `${s.members.filter((m) => isActiveOn(m)).length} actif(s) sur ${s.members.length}`],
     ['groupe', 'wallet', 'Caisse et solde initial', `${formatMAD(s.settings.openingBalance)} au ${fmtDate(s.settings.openingDate)}`],
     ['cloture', 'lock', 'Clôture mensuelle', `${s.closures.filter((c) => !c.reopened).length} mois clôturé(s)`],
     ['exports', 'file', 'Rapports et exports', 'Excel, PDF, CSV'],
@@ -47,7 +48,7 @@ export function Settings({ period }: { period: Period }) {
           </button>
         ))}
       </div>
-      <p className="note">Caisse commune · version 0.5 · montants en MAD · dates JJ/MM/AAAA</p>
+      <p className="note">Caisse commune · version 0.6 · montants en MAD · dates JJ/MM/AAAA</p>
       {panel === 'membres' && <MembersPanel onClose={() => setPanel(null)} period={period} />}
       {panel === 'groupe' && <GroupPanel onClose={() => setPanel(null)} />}
       {panel === 'cloture' && <ClosurePanel onClose={() => setPanel(null)} />}
@@ -87,7 +88,7 @@ function MembersPanel({ onClose, period }: { onClose: () => void; period: Period
     <Sheet title="Membres" onClose={onClose} footer={<Btn full onClick={() => setEdit('new')}>+ Ajouter un membre</Btn>}>
       {s.members.length === 0 && <Empty>Aucun membre.</Empty>}
       {[...s.members]
-        .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'fr'))
+        .sort((a, b) => Number(isActiveOn(b)) - Number(isActiveOn(a)) || a.name.localeCompare(b.name, 'fr'))
         .map((m) => {
           const st = memberStats(s, m.id, `${year}-01`, periodOf(todayISO()));
           return (
@@ -95,7 +96,7 @@ function MembersPanel({ onClose, period }: { onClose: () => void; period: Period
               <span className="avatar">{m.name.slice(0, 1)}</span>
               <span className="op-t">
                 <b>
-                  {m.name} {!m.active && <Badge tone="muted">inactif</Badge>}
+                  {m.name} <MemberStatusBadge m={m} />
                 </b>
                 <small>
                   {formatMAD(amountFor(s, m.id, periodOf(todayISO())))}/mois · reste {year} : {formatMAD(st.remainingInRange)}
@@ -109,8 +110,10 @@ function MembersPanel({ onClose, period }: { onClose: () => void; period: Period
   );
 }
 
-function MemberSheet({ member, onClose, year }: { member?: Member; onClose: () => void; year: number }) {
+function MemberSheet({ member: initial, onClose, year }: { member?: Member; onClose: () => void; year: number }) {
   const { state: s } = useStore();
+  // toujours la version à jour (après désactivation, renommage…)
+  const member = initial ? (s.members.find((x) => x.id === initial.id) ?? initial) : undefined;
   const [name, setName] = useState(member?.name ?? '');
   const [joinDate, setJoinDate] = useState(member?.joinDate ?? todayISO());
   const [amount, setAmount] = useState<number | null>(member ? null : 400_00);
@@ -144,10 +147,6 @@ function MemberSheet({ member, onClose, year }: { member?: Member; onClose: () =
   const all = memberStats(s, member.id, '0000-01', '9999-12');
   const rules = s.rules.filter((r) => r.memberId === member.id).sort((a, b) => b.validFrom.localeCompare(a.validFrom));
   const history = s.contributions.filter((c) => c.memberId === member.id).sort((a, b) => b.period.localeCompare(a.period));
-  const toggle = async () => {
-    const ok = await confirmDialog({ title: member.active ? 'Désactiver ce membre ?' : 'Réactiver ce membre ?', message: member.active ? 'Plus aucune cotisation ne sera générée pour lui. Son historique est conservé.' : 'Ses cotisations seront de nouveau générées.', confirm: member.active ? 'Désactiver' : 'Réactiver', danger: member.active });
-    if (ok !== false) tryRun((x, k) => updateMember(x, k, member.id, { active: !member.active }), member.active ? 'Membre désactivé' : 'Membre réactivé');
-  };
 
   return (
     <Sheet title={member.name} onClose={onClose}>
@@ -176,10 +175,8 @@ function MemberSheet({ member, onClose, year }: { member?: Member; onClose: () =
         <Btn kind="soft" onClick={() => tryRun((x, k) => updateMember(x, k, member.id, { name, joinDate }), 'Membre mis à jour')}>
           Enregistrer
         </Btn>
-        <Btn kind={member.active ? 'danger' : 'soft'} onClick={toggle}>
-          {member.active ? 'Désactiver' : 'Réactiver'}
-        </Btn>
       </div>
+      <MemberLeave key={member.leftDate ?? 'actif'} member={member} />
 
       <h4>Montant mensuel</h4>
       <ul className="trail">

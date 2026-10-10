@@ -4,8 +4,8 @@
  * on annule (status = 'cancelled') avec un motif tracé.
  */
 import type { AppState, Cents, Expense, ID, ISODate, Member, MonthlyContribution, Payment, PayMethod, Period, Role, Settings } from './types.ts';
-import { addMonths, dueDateFor, isValidISO, periodEnd, periodOf, todayISO } from './dates.ts';
-import { amountFor, isClosed, monthSummary, paidFor } from './finance.ts';
+import { addMonths, dueDateFor, isValidISO, periodOf, todayISO } from './dates.ts';
+import { amountFor, isClosed, isOwedFor, monthSummary, paidFor } from './finance.ts';
 import { formatMAD } from './money.ts';
 
 export class DomainError extends Error {
@@ -108,7 +108,33 @@ export function updateMember(s0: AppState, ctx: Ctx, id: ID, patch: Partial<Pick
   if (patch.joinDate !== undefined && !isValidISO(patch.joinDate)) throw new DomainError('date', "Date d'adhésion invalide.");
   const before = { ...m };
   Object.assign(m, patch, { updatedAt: nowOf(ctx) });
+  if (patch.active === true) delete m.leftDate; // réactivation complète
   audit(s, ctx, 'update', 'member', id, before, { ...m });
+  return s;
+}
+
+/**
+ * Sortie d'un membre à partir d'une date précise (ou réactivation avec `leftDate = null`).
+ * - Les mois qui commencent à cette date ou après ne sont plus dus : leurs cotisations sans
+ *   versement sont exclues des calculs (rien n'est supprimé : réactiver les fait réapparaître).
+ * - Le mois en cours à la date de sortie reste dû (ex. sortie le 15/03 → mars dû, avril non).
+ * - Les versements déjà faits sont conservés tels quels.
+ */
+export function setMemberLeave(s0: AppState, ctx: Ctx, id: ID, leftDate: ISODate | null, reason = ''): AppState {
+  requireAdmin(ctx);
+  const s = clone(s0);
+  const m = s.members.find((x) => x.id === id);
+  if (!m) throw new DomainError('notfound', 'Membre introuvable.');
+  if (leftDate !== null) {
+    if (!isValidISO(leftDate)) throw new DomainError('date', 'Date de sortie invalide.');
+    if (leftDate <= m.joinDate) throw new DomainError('date', "La date de sortie doit être postérieure à la date d'adhésion.");
+  }
+  const before = { ...m };
+  if (leftDate) m.leftDate = leftDate;
+  else delete m.leftDate;
+  m.active = !leftDate || leftDate > todayOf(ctx);
+  m.updatedAt = nowOf(ctx);
+  audit(s, ctx, 'update', 'member', id, before, { ...m }, reason || (leftDate ? `Inactif à partir du ${leftDate}` : 'Réactivé'));
   return s;
 }
 
@@ -149,7 +175,7 @@ export function generateMonth(s0: AppState, ctx: Ctx, period: Period): { state: 
   const s = clone(s0);
   let created = 0;
   for (const m of s.members) {
-    if (!m.active || m.joinDate > periodEnd(period)) continue;
+    if (!isOwedFor(m, period)) continue;
     if (s.contributions.some((c) => c.memberId === m.id && c.period === period)) continue;
     const c: MonthlyContribution = {
       id: stableUuid(`contribution:${m.id}:${period}`),

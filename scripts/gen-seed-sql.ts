@@ -24,7 +24,7 @@ const out: string[] = [
   `insert into opening_balances (cash_account_id, balance_date, amount) select id, ${q(s.settings.openingDate)}, ${m(s.settings.openingBalance)} from cash_accounts where is_default on conflict (cash_account_id) do update set balance_date = excluded.balance_date, amount = excluded.amount;`,
 ];
 const catName = new Map(s.categories.map((c) => [c.id, c.name]));
-for (const x of s.members) out.push(`insert into members (id, name, join_date, active, default_amount) values (${q(x.id)}, ${q(x.name)}, ${q(x.joinDate)}, ${x.active}, ${m(x.defaultAmount)});`);
+for (const x of s.members) out.push(`insert into members (id, name, join_date, left_date, active, default_amount) values (${q(x.id)}, ${q(x.name)}, ${q(x.joinDate)}, ${x.leftDate ? q(x.leftDate) : "null"}, ${x.active}, ${m(x.defaultAmount)});`);
 for (const r of s.rules) out.push(`insert into contribution_rules (id, member_id, amount, valid_from) values (${q(r.id)}, ${q(r.memberId)}, ${m(r.amount)}, ${q(r.validFrom + '-01')});`);
 for (const c of s.contributions) out.push(`insert into monthly_contributions (id, member_id, period, expected, due_date, overridden) values (${q(c.id)}, ${q(c.memberId)}, ${q(c.period + '-01')}, ${m(c.expected)}, ${q(c.dueDate)}, ${c.overridden});`);
 for (const p of s.payments) out.push(`insert into contribution_payments (id, contribution_id, member_id, paid_on, amount, method, comment, created_by) values (${q(p.id)}, ${q(p.contributionId)}, ${q(p.memberId)}, ${q(p.date)}, ${m(p.amount)}, ${q(p.method)}, ${q(p.comment)}, 'Démo');`);

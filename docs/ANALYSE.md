@@ -9,7 +9,7 @@ Remplacer le tableau Excel des cotisations par une application mobile qui dit, �
 | Module | Livré | Remarques |
 |---|---|---|
 | A — Tableau de bord | ✅ | Solde actuel, attendu / encaissé / dépenses / reste du mois, payés-partiels-impayés, cumuls annuels, ouverture/clôture, 2 graphiques, alertes retards et grosses dépenses, dernières opérations, filtre mois/année |
-| B — Membres | ✅ | Ajout, modification, désactivation, historique des montants par période, total cotisé, reste sur l'année |
+| B — Membres | ✅ | Ajout, modification, **désactivation à partir d'une date précise** (réversible, mois suivants non dus), historique des montants, **totaux par membre sur un mois, une année ou entre deux dates** (export Excel/CSV) |
 | C — Cotisations | ✅ | Génération automatique (idempotente), vue cartes + vue tableau type Excel, versements multiples, partiels, montant exceptionnel d'un mois, date prévue ≠ date réelle, retards en rouge |
 | D — Dépenses | ✅ | Saisie rapide, catégories, bénéficiaire (auto-complétion), mode, référence, commentaire, photo du justificatif (compressée), correction et annulation tracées |
 | E — Calculs | ✅ | Moteur pur et testé (§3), clôture mensuelle avec report |

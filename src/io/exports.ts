@@ -3,7 +3,7 @@
  * et rapports HTML imprimables (→ PDF via « Imprimer / Enregistrer en PDF »).
  */
 import type { AppState, Period } from '../domain/types.ts';
-import { annualTable, allOperations, monthSummary, yearSummary, contributionRows, balanceBefore } from '../domain/finance.ts';
+import { annualTable, allOperations, monthSummary, yearSummary, contributionRows, balanceBefore, memberTotals } from '../domain/finance.ts';
 import { fmtDate, makePeriod, MONTHS_FR, periodLabel } from '../domain/dates.ts';
 import { formatMAD } from '../domain/money.ts';
 import { buildXlsx, colName, type XCell, type XSheet } from './xlsx.ts';
@@ -184,3 +184,33 @@ ${t.map((r, i) => `<tr><td>${MONTHS_FR[i]}</td>${members.map((m) => `<td class="
 }
 
 export const defaultMonth = (year: number) => makePeriod(year, 1);
+
+/** Totaux des cotisations par membre sur une période (mois, année ou entre deux dates). */
+export function memberTotalsWorkbook(s: AppState, from: string, to: string, label: string, today?: string): Uint8Array {
+  const { rows, total } = memberTotals(s, from, to, today);
+  const r: XCell[][] = [];
+  r.push([H(`Totaux des cotisations par membre — ${label}`)]);
+  r.push([`Du ${fmtDate(from)} au ${fmtDate(to)} — ${s.settings.groupName}`]);
+  r.push([]);
+  r.push([H('Membre'), H('Statut'), H('Mois dus'), H('Attendu'), H('Versé pour ces mois'), H('Reste'), H('Reçu pendant la période'), H('Nb versements'), H('Mois en retard')]);
+  const first = 5;
+  for (const x of rows) {
+    r.push([x.name, x.leftDate ? `Inactif depuis le ${fmtDate(x.leftDate)}` : x.active ? 'Actif' : 'Inactif', x.months, money(x.expected), money(x.paidForPeriod), money(x.remaining), money(x.received), x.payments, x.lateMonths]);
+  }
+  const last = first + rows.length - 1;
+  const S = (c: string): XCell => (rows.length ? { f: `SUM(${c}${first}:${c}${last})`, money: c !== 'C' && c !== 'H' && c !== 'I', bold: true } : { v: 0 });
+  r.push([H('Total'), null, S('C'), S('D'), S('E'), S('F'), S('G'), S('H'), S('I')]);
+  r.push([]);
+  r.push(['« Versé pour ces mois » : versements rattachés aux cotisations des mois de la période (même payés plus tard). « Reçu » : argent réellement reçu entre les deux dates.']);
+  void total;
+  return buildXlsx([{ name: 'Totaux par membre', rows: r, colWidths: [22, 26, 10, 16, 20, 16, 22, 14, 14] }]);
+}
+
+export function memberTotalsCsv(s: AppState, from: string, to: string, today?: string): string {
+  const { rows, total } = memberTotals(s, from, to, today);
+  const n = (c: number) => (c / 100).toFixed(2).replace('.', ',');
+  const lines = [['Membre', 'Statut', 'Mois dus', 'Attendu', 'Versé pour ces mois', 'Reste', 'Reçu pendant la période', 'Nb versements', 'Mois en retard'].join(';')];
+  for (const x of rows) lines.push([x.name, x.leftDate ? `Inactif depuis le ${fmtDate(x.leftDate)}` : x.active ? 'Actif' : 'Inactif', x.months, n(x.expected), n(x.paidForPeriod), n(x.remaining), n(x.received), x.payments, x.lateMonths].join(';'));
+  lines.push(['Total', '', total.months, n(total.expected), n(total.paidForPeriod), n(total.remaining), n(total.received), total.payments, total.lateMonths].join(';'));
+  return '﻿' + lines.join('\r\n');
+}

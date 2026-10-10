@@ -53,6 +53,11 @@ create table if not exists members (
   updated_at      timestamptz not null default now()
 );
 create unique index if not exists members_name_uq on members (lower(name));
+-- Sortie d'un membre : à partir de cette date il ne doit plus de cotisation (mise à niveau incluse)
+alter table members add column if not exists left_date date;
+do $$ begin
+  alter table members add constraint members_left_after_join check (left_date is null or left_date > join_date);
+exception when duplicate_object then null; end $$;
 
 -- Historique des montants : la règle applicable à un mois est la plus récente valid_from <= mois
 create table if not exists contribution_rules (

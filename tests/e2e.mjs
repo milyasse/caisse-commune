@@ -145,6 +145,42 @@ check('Bandeau démo retiré', !(await page.isVisible('.demo-banner >> text=Donn
 await page.screenshot({ path: `${out}/11-accueil-reel.png`, fullPage: true });
 await page.click('nav.tabs >> text=Cotisations');
 await page.screenshot({ path: `${out}/12-cotisations-reel.png`, fullPage: true });
+
+// Totaux par membre sur une période (mois / année / entre deux dates)
+await page.click('.top-seg >> text=Totaux par membre');
+await page.waitForSelector('.totals');
+await page.click('.totals .chip:text-is("2025")');
+await page.waitForTimeout(150);
+const tot25 = await page.locator('.totals .kpis .mini b').allTextContents();
+check(`Totaux 2025 : reçu ${tot25[3]} (fichier : 16 150,00)`, num(tot25[3]) === 16150);
+const rows25 = await page.locator('.totals .mt-card').count();
+check(`Totaux 2025 : ${rows25} membres listés`, rows25 >= 4);
+await page.screenshot({ path: `${out}/13-totaux-annee.png`, fullPage: true });
+await page.click('.totals .seg >> text=Entre deux dates');
+await page.fill('.totals input[type=date] >> nth=0', '2025-01-01');
+await page.fill('.totals input[type=date] >> nth=1', '2026-10-10');
+await page.waitForTimeout(150);
+const totR = await page.locator('.totals .kpis .mini b').allTextContents();
+check(`Totaux du 01/01/2025 au 10/10/2026 : reçu ${totR[3]} (16 150 + 15 400)`, num(totR[3]) === 31550);
+await page.screenshot({ path: `${out}/14-totaux-dates.png`, fullPage: true });
+await page.click('.totals .seg >> text=Mois');
+check('Totaux : mode Mois affiché', await page.isVisible('.totals input[type=month]'));
+
+// Désactiver un membre à partir d'une date précise
+await page.click('nav.tabs >> text=Paramètres');
+await page.click('.op >> text=Membres');
+await page.locator('.sheet .op').first().click();
+await page.waitForSelector('.leave-box');
+await page.fill('.leave-box input[type=date]', '2026-09-01');
+await page.click('.leave-box >> text=Désactiver à cette date');
+await page.click('.dialog .btn-danger');
+await page.waitForSelector('.toast >> text=inactif depuis');
+check('Membre désactivé à partir du 01/09/2026', await page.isVisible('.leave-box >> text=inactif depuis le 01/09/2026'));
+await page.screenshot({ path: `${out}/15-membre-inactif.png` });
+await page.click('.leave-box >> text=Réactiver');
+await page.click('.dialog .btn-primary');
+await page.waitForSelector('.toast >> text=Membre réactivé');
+check('Membre réactivé', await page.isVisible('.leave-box .badge:text-is("actif")'));
 check('Aucune erreur JavaScript', errors.length === 0);
 if (errors.length) console.log(errors.join('\n'));
 await browser.close();

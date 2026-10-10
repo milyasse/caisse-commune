@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyState, demoState } from '../src/domain/seed.ts';
 import * as C from '../src/domain/commands.ts';
-import { monthSummary, contributionRows, yearSummary, balanceAt, annualTable } from '../src/domain/finance.ts';
+import { monthSummary, contributionRows, yearSummary, balanceAt, annualTable, memberTotals, memberStats, isActiveOn, receiptsBetween, expensesBetween } from '../src/domain/finance.ts';
 import { formatMAD, parseMAD } from '../src/domain/money.ts';
 import { buildPreview, applyImport, guessMapping, type Grid } from '../src/io/importer.ts';
 import { MemoryRemote, syncOnce, emptyMeta, enqueue, diffToOutbox } from '../src/domain/sync.ts';
@@ -262,4 +262,89 @@ test('Exports : xlsx relisible, CSV, rapport HTML', async () => {
   const csv = operationsCsv(s);
   assert.ok(readCsv(csv.slice(1)).length > 20);
   assert.match(monthlyReportHtml(s, '2026-09'), /Solde de clôture/);
+});
+
+test('Totaux par membre : mois, année, entre deux dates', () => {
+  let s = base();
+  s = pay(s, 'Ahmed', '2026-01', '2026-01-10', 400_00);
+  s = pay(s, 'Ahmed', '2026-02', '2026-03-05', 400_00); // février payé en mars
+  s = pay(s, 'Bouazza', '2026-01', '2026-01-20', 300_00);
+  // Année (jan → mars)
+  const y = memberTotals(s, '2026-01-01', '2026-12-31', TODAY);
+  const a = y.rows.find((r) => r.name === 'Ahmed')!;
+  assert.equal(a.expected, 1200_00);
+  assert.equal(a.paidForPeriod, 800_00);
+  assert.equal(a.remaining, 400_00);
+  assert.equal(a.received, 800_00);
+  assert.equal(a.payments, 2);
+  assert.equal(y.total.expected, 3000_00);
+  assert.equal(y.total.received, 1100_00);
+  // Un mois : février -> versé pour février 400 (payé en mars), reçu en février 0
+  const f = memberTotals(s, '2026-02-01', '2026-02-28', TODAY).rows.find((r) => r.name === 'Ahmed')!;
+  assert.equal(f.paidForPeriod, 400_00);
+  assert.equal(f.received, 0);
+  // Entre deux dates (01/03 → 20/03) : reçu 400 (versement du 05/03)
+  const m = memberTotals(s, '2026-03-01', '2026-03-20', TODAY).rows.find((r) => r.name === 'Ahmed')!;
+  assert.equal(m.received, 400_00);
+  assert.equal(m.expected, 400_00);
+  // cohérence avec la trésorerie
+  assert.equal(y.total.received, receiptsBetween(s, '2026-01-01', '2026-12-31'));
+});
+
+test('Désactivation d’un membre à partir d’une date précise (réversible)', () => {
+  let s = base();
+  s = pay(s, 'Bouazza', '2026-02', '2026-02-10', 600_00);
+  // Bouazza n'est plus membre à partir du 01/03/2026 : mars n'est plus dû
+  s = C.setMemberLeave(s, ctx, mid(s, 'Bouazza'), '2026-03-01');
+  const b = s.members.find((m) => m.name === 'Bouazza')!;
+  assert.equal(b.active, false);
+  assert.equal(isActiveOn(b, '2026-02-28'), true);
+  assert.equal(isActiveOn(b, '2026-03-01'), false);
+  assert.equal(contributionRows(s, '2026-03', TODAY).some((r) => r.memberName === 'Bouazza'), false);
+  assert.equal(monthSummary(s, '2026-03', TODAY).expected, 400_00);
+  // Janvier impayé reste dû ; février payé reste payé
+  assert.equal(row(s, 'Bouazza', '2026-01').remaining, 600_00);
+  assert.equal(row(s, 'Bouazza', '2026-02').status, 'paye');
+  // Plus de génération après la sortie
+  s = C.generateMonth(s, ctx, '2026-04').state;
+  assert.equal(s.contributions.some((c) => c.memberId === b.id && c.period === '2026-04'), false);
+  const st = memberStats(s, b.id, '2026-01', '2026-04');
+  assert.equal(st.expectedInRange, 1200_00);
+  // Sortie en milieu de mois : le mois en cours reste dû
+  const b2 = base();
+  const s2 = C.setMemberLeave(b2, ctx, mid(b2, 'Bouazza'), '2026-03-15');
+  assert.equal(contributionRows(s2, '2026-03', TODAY).some((r) => r.memberName === 'Bouazza'), true);
+  // Date future : encore actif aujourd'hui
+  const s3 = C.setMemberLeave(b2, ctx, mid(b2, 'Bouazza'), '2026-06-01');
+  assert.equal(s3.members.find((m) => m.name === 'Bouazza')!.active, true);
+  // Réactivation : mars redevient dû
+  s = C.setMemberLeave(s, ctx, b.id, null);
+  assert.equal(row(s, 'Bouazza', '2026-03').remaining, 600_00);
+  assert.equal(s.members.find((m) => m.name === 'Bouazza')!.active, true);
+  // Validation
+  assert.throws(() => C.setMemberLeave(s, ctx, b.id, '2025-12-01'), /postérieure/);
+  assert.throws(() => C.setMemberLeave(s, { ...ctx, role: 'lecteur' as any }, b.id, '2026-05-01'));
+});
+
+test('Performance : calculs mis en cache sur un gros historique', () => {
+  let s = demoState('2026-10-10');
+  // ~ 5 000 versements supplémentaires simulés
+  const c0 = s.contributions[0];
+  s = structuredClone(s);
+  for (let i = 0; i < 5000; i++) s.payments.push({ ...structuredClone(s.payments[0]), id: 'x' + i, contributionId: c0.id, amount: 1, status: 'cancelled' });
+  const t0 = performance.now();
+  for (let k = 0; k < 50; k++) for (let m = 1; m <= 12; m++) monthSummary(s, `2026-${String(m).padStart(2, '0')}`, '2026-10-10');
+  memberTotals(s, '2026-01-01', '2026-12-31', '2026-10-10');
+  assert.ok(performance.now() - t0 < 1500, 'trop lent');
+  assert.equal(expensesBetween(s, '2026-01-01', '2026-12-31') >= 0, true);
+});
+
+test('Export des totaux par membre (xlsx relisible + CSV)', async () => {
+  const s = demoState('2026-10-10');
+  const { memberTotalsWorkbook, memberTotalsCsv } = await import('../src/io/exports.ts');
+  const sheets = await readXlsx(memberTotalsWorkbook(s, '2026-01-01', '2026-12-31', 'Année 2026', '2026-10-10'));
+  assert.equal(sheets[0].name, 'Totaux par membre');
+  assert.equal(sheets[0].grid[3][0], 'Membre');
+  assert.equal(sheets[0].grid.length >= 9, true);
+  assert.match(memberTotalsCsv(s, '2026-01-01', '2026-12-31', '2026-10-10'), /Total;/);
 });

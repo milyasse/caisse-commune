@@ -6,6 +6,8 @@ import type { ContributionStatus, Period } from '../../domain/types.ts';
 import { DomainError } from '../../domain/commands.ts';
 
 export const cx = (...c: (string | false | undefined | null)[]) => c.filter(Boolean).join(' ');
+export const MEMBER_COLORS = ['#17633d', '#2f6fed', '#e8780c', '#6c4cd8', '#0e8c8c', '#d63a7c', '#d99a00', '#8b5e34', '#d93a30', '#3a7d44'];
+export const memberColor = (index: number) => MEMBER_COLORS[index % MEMBER_COLORS.length];
 
 export function Money({ c, tone, big }: { c: number; tone?: 'auto' | 'pos' | 'neg' | 'muted'; big?: boolean }) {
   const t = tone === 'auto' ? (c < 0 ? 'neg' : 'pos') : tone;

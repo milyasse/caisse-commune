@@ -20,7 +20,7 @@ export interface Session {
 
 type Map_ = { table: string; fields: [app: string, db: string, kind?: 'money' | 'period'][]; cursorCol: string };
 const MAPS: Record<SyncTable, Map_> = {
-  members: { table: 'members', cursorCol: 'updated_at', fields: [['id', 'id'], ['name', 'name'], ['joinDate', 'join_date'], ['active', 'active'], ['defaultAmount', 'default_amount', 'money'], ['phone', 'phone'], ['updatedAt', 'updated_at']] },
+  members: { table: 'members', cursorCol: 'updated_at', fields: [['id', 'id'], ['name', 'name'], ['joinDate', 'join_date'], ['active', 'active'], ['leftDate', 'left_date'], ['defaultAmount', 'default_amount', 'money'], ['phone', 'phone'], ['updatedAt', 'updated_at']] },
   rules: { table: 'contribution_rules', cursorCol: 'updated_at', fields: [['id', 'id'], ['memberId', 'member_id'], ['amount', 'amount', 'money'], ['validFrom', 'valid_from', 'period'], ['updatedAt', 'updated_at']] },
   contributions: { table: 'monthly_contributions', cursorCol: 'updated_at', fields: [['id', 'id'], ['memberId', 'member_id'], ['period', 'period', 'period'], ['expected', 'expected', 'money'], ['dueDate', 'due_date'], ['overridden', 'overridden'], ['note', 'note'], ['updatedAt', 'updated_at']] },
   payments: { table: 'contribution_payments', cursorCol: 'updated_at', fields: [['id', 'id'], ['contributionId', 'contribution_id'], ['memberId', 'member_id'], ['date', 'paid_on'], ['amount', 'amount', 'money'], ['method', 'method'], ['reference', 'reference'], ['comment', 'comment'], ['status', 'status'], ['cancelReason', 'cancel_reason'], ['createdBy', 'created_by'], ['updatedAt', 'updated_at']] },

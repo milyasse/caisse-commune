@@ -67,6 +67,17 @@ do $$ declare a numeric; b numeric; begin
 end $$;
 
 -- Sécurité (RLS) : un utilisateur non admin ne peut pas modifier les membres
+-- Sortie d'un membre : les mois suivants sans versement ne sont plus dus
+do $$ declare n_before int; n_after int; mid uuid; p date; begin
+  select member_id, max(period) into mid, p from v_contribution_status where paid = 0 group by member_id limit 1;
+  select count(*) into n_before from v_contribution_status where member_id = mid;
+  update members set left_date = p where id = mid;
+  select count(*) into n_after from v_contribution_status where member_id = mid;
+  if n_after >= n_before then raise exception 'ÉCHEC sortie de membre ignorée par les vues'; end if;
+  update members set left_date = null where id = mid;
+  raise notice 'OK  membre inactif à partir d''une date : mois suivants non dus (%→%)', n_before, n_after;
+end $$;
+select pg_temp.expect_error($$update members set left_date = join_date - 1 where name = 'Ahmed'$$, 'members_left_after_join', 'date de sortie postérieure à l''adhésion');
 insert into auth.users (id, email) values ('00000000-0000-4000-8000-000000000001', 'admin@test'), ('00000000-0000-4000-8000-000000000002', 'user@test');
 update app_users set active = true;
 grant select, insert, update on all tables in schema public to authenticated;

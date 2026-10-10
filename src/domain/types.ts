@@ -18,6 +18,8 @@ export interface Member {
   name: string;
   joinDate: ISODate;
   active: boolean;
+  /** Date à partir de laquelle le membre ne fait plus partie des membres actifs (plus de cotisation due). */
+  leftDate?: ISODate;
   defaultAmount: Cents;
   phone?: string;
   updatedAt: string;

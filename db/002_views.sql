@@ -17,7 +17,9 @@ join members m on m.id = c.member_id
 left join (
   select contribution_id, sum(amount) as paid, max(paid_on) as last_paid_on
   from contribution_payments where status = 'valid' group by contribution_id
-) p on p.contribution_id = c.id;
+) p on p.contribution_id = c.id
+-- mois postérieurs à la sortie du membre, sans versement : non dus (même règle que isWaived)
+where not (m.left_date is not null and c.period >= m.left_date and coalesce(p.paid, 0) = 0);
 
 -- Synthèse mensuelle de trésorerie : ouverture, attendu, encaissé (date réelle),
 -- dépenses (date réelle), clôture, reste à encaisser.
