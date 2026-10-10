@@ -126,7 +126,12 @@ function findHeaderRow(grid: Grid): number {
   return best;
 }
 
-const MONTH_COL_RE = /^(شهر|mois)\s*(\d{1,2})$/;
+const MONTH_COL_RE = /^(?:(?:شهر|mois)\s*(\d{1,2})|(\d{1,2})\s*(?:شهر|mois))$/;
+/** Numéro de mois d'un en-tête « شهر 3 », « 3 شهر » ou « mois 3 », sinon 0. */
+const monthOfHeader = (c: Cell) => {
+  const m = norm(c).match(MONTH_COL_RE);
+  return m ? +(m[1] ?? m[2]) : 0;
+};
 
 /** Devine la correspondance des colonnes à partir de la ligne d'en-tête. */
 export function guessMapping(grid: Grid, s: AppState): Mapping {
@@ -206,6 +211,7 @@ export function guessMapping(grid: Grid, s: AppState): Mapping {
 }
 
 const PERSONNEL_RE = /اجره|الحارس|اجور|salaire|gardien|personnel/;
+const CHARGES_RE = /كهرباء|الماء|electricit|eau |charges|عداد/;
 
 export function buildPreview(grid: Grid, mapping: Mapping, s: AppState, today: ISODate): PreviewLine[] {
   const lines: PreviewLine[] = [];
@@ -263,9 +269,13 @@ export function buildPreview(grid: Grid, mapping: Mapping, s: AppState, today: I
   };
 
   let year: number | undefined;
+  let section = ''; // titre de rubrique en cours (« أجرة الحارس الأسبوعية », « الكهرباء »…)
+  const headerNorm = (grid[mapping.headerRow] ?? []).map(norm);
   rows.forEach((r, i) => {
     const rowNo = mapping.headerRow + i + 2;
     if (!r || r.every(isEmpty)) return;
+    // En-tête répété plus bas dans la feuille
+    if (r.filter((c, j) => !isEmpty(c) && norm(c) === headerNorm[j]).length >= 3) return;
 
     if (mapping.layout === 'payments') {
       const c = mapping.columns;
@@ -288,7 +298,12 @@ export function buildPreview(grid: Grid, mapping: Mapping, s: AppState, today: I
           if (v) ((amount = v), (amountCol = ac));
           if (v) break;
         }
-        if (amount === null) return; // titre de section, semaine non payée…
+        if (amount === null) {
+          // Ligne de titre de rubrique : on retient le libellé pour les lignes suivantes
+          const label = [get('description'), ...r.map((x) => (typeof x === 'string' ? x.trim() : ''))].find((x) => x && !/^العدد$|^n°?$/i.test(norm(x)) && !/^[\d\s.,\/-]+$/.test(x));
+          if (label && !isTotalRow(r) && (c.date === undefined || isEmpty(r[c.date]))) section = label;
+          return;
+        }
       } else {
         if (c.amount === undefined || isEmpty(r[c.amount])) {
           if (c.date === undefined || isEmpty(r[c.date])) return;
@@ -297,9 +312,10 @@ export function buildPreview(grid: Grid, mapping: Mapping, s: AppState, today: I
       }
       if (isTotalRow(r) && (c.date === undefined || isEmpty(r[c.date]))) return;
       const { date, fixed } = parseDateLoose(c.date === undefined ? undefined : r[c.date]);
-      const description = get('description') || 'Dépense importée';
-      const personnel = PERSONNEL_RE.test(norm(description));
-      const category = get('category') || (personnel ? 'Paiement du personnel' : 'Autres dépenses');
+      const description = get('description') || section || 'Dépense importée';
+      const context = norm(`${description} ${section}`);
+      const personnel = PERSONNEL_RE.test(context);
+      const category = get('category') || (personnel ? 'Paiement du personnel' : CHARGES_RE.test(context) ? 'Charges communes' : 'Autres dépenses');
       const beneficiary = get('beneficiary') || (personnel ? 'Gardien' : '');
       const payer = get('payer');
       const comment = [get('comment'), payer ? `Payé par ${payer}` : ''].filter(Boolean).join(' · ') || undefined;
@@ -314,8 +330,7 @@ export function buildPreview(grid: Grid, mapping: Mapping, s: AppState, today: I
         if (Math.min(gap, gapPrev) > 15) l.warnings.push(`Date de paiement éloignée de la période indiquée (${wk[0]}) : à vérifier`);
       }
       if (date && amountCol !== undefined) {
-        const mm = norm((grid[mapping.headerRow] ?? [])[amountCol]).match(MONTH_COL_RE);
-        const colMonth = mm ? +mm[2] : 0;
+        const colMonth = monthOfHeader((grid[mapping.headerRow] ?? [])[amountCol]);
         const dm = +date.slice(5, 7);
         const diff = (colMonth - dm + 12) % 12;
         if (colMonth && diff > 1) l.warnings.push(`Date ${fmtDate(date)} classée en « ${(grid[mapping.headerRow] ?? [])[amountCol]} » : à vérifier`);

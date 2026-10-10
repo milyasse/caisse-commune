@@ -135,7 +135,8 @@ def mode_emploi(wb, prefilled):
             ("", False),
             ("Contenu pré-rempli (à vérifier avant import) :", True),
             ("  Versements de mars 2025 à octobre 2026, recopiés de la feuille « المساهمات » (77 lignes).", False),
-            ("  Dépenses : un total par mois (colonne « المصاريف الشهرية »), daté du dernier jour du mois (20 lignes).", False),
+            ("  Dépenses : le détail de la feuille « المصاريف » — 84 salaires hebdomadaires du gardien et 6 recharges d'électricité (90 lignes).", False),
+            ("  Correction : semaine du 08/09 au 14/09 payée « 06/08/2025 » dans le fichier, remplacé par 06/09/2025 (à vérifier).", False),
             ("  Correction : « 31/06/2025 » (date inexistante) remplacé par 30/06/2025.", False),
             ("  Résultat attendu après les deux imports : solde en caisse 1 600,00 MAD au 10/10/2026, comme dans le fichier d'origine.", False),
         ]
@@ -143,6 +144,36 @@ def mode_emploi(wb, prefilled):
         c = ws.cell(row=i, column=1, value=text)
         c.font = Font(name=F, bold=bold, size=13 if i == 1 else 11, color="17633D" if bold else "15211A")
         c.alignment = Alignment(wrap_text=True, vertical="top")
+
+
+def depenses_detaillees():
+    """Lit l'extrait réel de la feuille « المصاريف » (tests/fixtures/extrait-depenses-reel.tsv)."""
+    import csv, os
+    path = os.path.join(os.path.dirname(__file__), "..", "tests", "fixtures", "extrait-depenses-reel.tsv")
+    rows = list(csv.reader(open(path, encoding="utf-8"), delimiter="\t"))
+    deps, section = [], ""
+    for r in rows[3:]:
+        r = r + [""] * 30
+        week, rub, date, payer = r[0].strip(), r[1].strip(), r[2].strip(), r[3].strip()
+        if week == "الأسبوع":  # en-tête répété
+            continue
+        amounts = [x.strip() for x in r[5:27] if x.strip() not in ("", "-")]
+        if not amounts:
+            if not date and rub and week in ("العدد", ""):
+                section = rub
+            continue
+        if not date or "مجموع" in week + rub:
+            continue
+        amount = float(amounts[0].replace(" ", "").replace(",", "."))
+        label = rub or section
+        cat = "Paiement du personnel" if "أجرة" in label or "الحارس" in label else "Charges communes"
+        benef = "Gardien" if cat == "Paiement du personnel" else ""
+        comment = f"Payé par {payer}" if payer else None
+        if date == "06/08/2025" and "08/09" in rub:
+            date = "06/09/2025"
+            comment = (comment or "") + " · date corrigée (fichier : 06/08/2025)"
+        deps.append((date, cat, label, benef, amount, "Espèces", f"Semaine {week}" if week.isdigit() and cat == "Paiement du personnel" else None, comment))
+    return deps
 
 
 def build(prefilled: bool, path: str):
@@ -153,10 +184,7 @@ def build(prefilled: bool, path: str):
             for name, a in zip(MEMBRES, amounts):
                 if a:
                     pays.append((date, name, f"{month:02d}/{year}", a, None))
-            end = f"{LAST_DAY[month]:02d}/{month:02d}/{year}"
-            if (year, month) == (2026, 10):
-                end = TODAY  # mois en cours : dépense datée d'aujourd'hui
-            deps.append((end, "Paiement du personnel", f"Dépenses du mois de {MOIS_FR[month - 1]} {year}", "Gardien", dep, "Espèces", None, "Total mensuel repris du fichier Excel"))
+        deps = depenses_detaillees()
     else:
         pays = [("01/10/2026", MEMBRES[0], "10/2026", 400, "Exemple — à remplacer")]
         deps = [("05/10/2026", "Paiement du personnel", "Salaire hebdomadaire du gardien", "Gardien", 350, "Espèces", None, "Exemple — à remplacer")]

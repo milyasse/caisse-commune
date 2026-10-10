@@ -227,7 +227,8 @@ export async function readXlsx(buf: Uint8Array): Promise<{ name: string; grid: G
 /** Lecture CSV (séparateur ; ou , détecté automatiquement, guillemets gérés). */
 export function readCsv(text: string): Grid {
   const first = text.split(/\r?\n/)[0] ?? '';
-  const sep = (first.match(/;/g)?.length ?? 0) >= (first.match(/,/g)?.length ?? 0) ? ';' : ',';
+  const count = (ch: string) => first.split(ch).length - 1;
+  const sep = count('\t') > 0 && count('\t') >= count(';') ? '\t' : count(';') >= count(',') ? ';' : ',';
   const rows: string[][] = [];
   let row: string[] = [];
   let cur = '';

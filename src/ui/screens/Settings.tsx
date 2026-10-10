@@ -47,7 +47,7 @@ export function Settings({ period }: { period: Period }) {
           </button>
         ))}
       </div>
-      <p className="note">Caisse commune · version 0.3 · montants en MAD · dates JJ/MM/AAAA</p>
+      <p className="note">Caisse commune · version 0.4 · montants en MAD · dates JJ/MM/AAAA</p>
       {panel === 'membres' && <MembersPanel onClose={() => setPanel(null)} period={period} />}
       {panel === 'groupe' && <GroupPanel onClose={() => setPanel(null)} />}
       {panel === 'cloture' && <ClosurePanel onClose={() => setPanel(null)} />}
@@ -387,7 +387,7 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
   const load = async (file: File) => {
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
-      const sh = /\.csv$/i.test(file.name) ? [{ name: file.name, grid: readCsv(new TextDecoder().decode(buf)) }] : (await readXlsx(buf)).filter((x) => x.grid.some((r) => r?.some((c) => c !== null && c !== undefined && c !== '')));
+      const sh = /\.(csv|tsv|txt)$/i.test(file.name) ? [{ name: file.name, grid: readCsv(new TextDecoder().decode(buf)) }] : (await readXlsx(buf)).filter((x) => x.grid.some((r) => r?.some((c) => c !== null && c !== undefined && c !== '')));
       if (!sh.length) throw new Error('Le fichier ne contient aucune feuille remplie.');
       setSheets(sh);
       setIdx(0);
@@ -437,7 +437,7 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
     <Sheet title="Importer l'ancien fichier Excel" onClose={onClose} footer={lines ? <Btn full disabled={!ok.length} onClick={doImport}>Importer {ok.length} opération(s)</Btn> : undefined}>
       <label className="btn btn-soft full">
         <Icon name="in" /> Choisir un fichier (.xlsx ou .csv)
-        <input type="file" hidden accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={(e) => e.target.files?.[0] && load(e.target.files[0])} />
+        <input type="file" hidden accept=".xlsx,.csv,.tsv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain" onChange={(e) => e.target.files?.[0] && load(e.target.files[0])} />
       </label>
       {!sheets.length && (
         <div className="note">

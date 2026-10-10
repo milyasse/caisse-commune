@@ -117,6 +117,37 @@ test('Canevas pré-rempli (écrit par openpyxl, caractères encodés &#…;) : d
   }
   assert.deepEqual(s.members.map((m) => m.name), ['امحمد', 'بوعزة', 'بنعاشير', 'موسى']);
   assert.equal(s.payments.length, 77);
-  assert.equal(s.expenses.length, 20);
+  assert.equal(s.expenses.length, 90);
   assert.equal(balanceAt(s, TODAY), 1600_00);
+});
+
+test('Extrait réel de la feuille المصاريف (copié depuis Excel) : 90 dépenses, totaux = ligne « مجموع المصاريف »', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { readCsv } = await import('../src/io/xlsx.ts');
+  const grid = readCsv(readFileSync(new URL('./fixtures/extrait-depenses-reel.tsv', import.meta.url), 'utf8'));
+  const base = emptyState(TODAY);
+  base.settings.openingDate = '2025-03-01';
+  const m = guessMapping(grid, base);
+  assert.equal(m.layout, 'expenses');
+  if (m.layout !== 'expenses') return;
+  assert.equal(m.amountCols?.length, 22); // « 3 شهر » … « 12 شهر » (2025) + « 1 شهر » … « 12 شهر » (2026)
+  const lines = buildPreview(grid, m, base, TODAY);
+  assert.equal(lines.filter((l) => l.errors.length).length, 0, JSON.stringify(lines.filter((l) => l.errors.length).slice(0, 2)));
+  const salaires = lines.filter((l) => l.category === 'Paiement du personnel');
+  const elec = lines.filter((l) => l.category === 'Charges communes');
+  assert.equal(salaires.length, 84);
+  assert.equal(elec.length, 6);
+  assert.equal(lines.length, 90);
+  // Les lignes 2026 sans libellé reprennent le titre de la rubrique
+  assert.equal(lines.find((l) => l.date === '2026-01-03')!.description, 'أجرة الحارس الأسبوعية');
+  assert.equal(lines.find((l) => l.date === '2025-03-08' && l.category === 'Charges communes')!.amount, 100_00);
+  const sumYear = (y: string) => lines.filter((l) => l.date!.startsWith(y)).reduce((a, l) => a + l.amount!, 0);
+  assert.equal(sumYear('2025'), 15950_00); // « مجموع المصاريف السنوي »
+  assert.equal(sumYear('2026'), 14000_00);
+  // Seule la semaine 28 (payée « 06/08/2025 » pour la semaine du 08/09) est signalée
+  const flagged = lines.filter((l) => l.warnings.some((w) => w.includes('à vérifier')));
+  assert.deepEqual(flagged.map((l) => l.row), [32]);
+  const s = applyImport(base, ctx, lines).state;
+  assert.equal(s.expenses.length, 90);
+  assert.ok(s.expenses.every((e) => e.comment?.startsWith('Payé par ')));
 });
