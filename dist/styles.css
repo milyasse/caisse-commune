@@ -321,3 +321,7 @@ table.grid td.wrap { white-space: normal; min-width: 180px; }
 
 .avatar.sm { width: 32px; height: 32px; font-size: 13px; }
 .hero-v small { font-size: 0.5em; margin-left: 6px; font-weight: 700; opacity: .8; }
+.crash { max-width: 480px; margin: 18vh auto 0; padding: 24px 18px; display: flex; flex-direction: column; gap: 12px; text-align: center; }
+.crash h2 { margin: 0; font-size: 20px; }
+.crash p { margin: 0; color: var(--muted); }
+.crash details { font-size: 12px; color: var(--muted); text-align: left; }

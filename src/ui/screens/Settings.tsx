@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { backupJson, clearAll, configureSupabase, hashPin, resetDemo, restoreJson, run, startReal, syncNow, useStore } from '../../store/store.ts';
 import { addCategory, addMember, closeMonth, reopenMonth, setMemberAmount, updateMember, updateSettings } from '../../domain/commands.ts';
-import { amountFor, contributionRows, isActiveOn, memberStats, monthSummary } from '../../domain/finance.ts';
+import { amountFor, contributionRows, isActiveOn, isWaived, memberStats, monthSummary } from '../../domain/finance.ts';
 import { addMonths, fmtDate, periodLabel, periodOf, periodStart, periodYear, todayISO } from '../../domain/dates.ts';
 import { formatMAD } from '../../domain/money.ts';
 import type { Member, Period } from '../../domain/types.ts';
@@ -48,7 +48,7 @@ export function Settings({ period }: { period: Period }) {
           </button>
         ))}
       </div>
-      <p className="note">Caisse commune · version 0.6 · montants en MAD · dates JJ/MM/AAAA</p>
+      <p className="note">Caisse commune · version 0.6.1 · montants en MAD · dates JJ/MM/AAAA</p>
       {panel === 'membres' && <MembersPanel onClose={() => setPanel(null)} period={period} />}
       {panel === 'groupe' && <GroupPanel onClose={() => setPanel(null)} />}
       {panel === 'cloture' && <ClosurePanel onClose={() => setPanel(null)} />}
@@ -146,7 +146,7 @@ function MemberSheet({ member: initial, onClose, year }: { member?: Member; onCl
   const st = memberStats(s, member.id, `${year}-01`, `${year}-12`);
   const all = memberStats(s, member.id, '0000-01', '9999-12');
   const rules = s.rules.filter((r) => r.memberId === member.id).sort((a, b) => b.validFrom.localeCompare(a.validFrom));
-  const history = s.contributions.filter((c) => c.memberId === member.id).sort((a, b) => b.period.localeCompare(a.period));
+  const history = s.contributions.filter((c) => c.memberId === member.id && !isWaived(s, c)).sort((a, b) => b.period.localeCompare(a.period));
 
   return (
     <Sheet title={member.name} onClose={onClose}>
@@ -212,7 +212,8 @@ function MemberSheet({ member: initial, onClose, year }: { member?: Member; onCl
           </thead>
           <tbody>
             {history.map((c) => {
-              const r = contributionRows(s, c.period).find((x) => x.contribution.id === c.id)!;
+              const r = contributionRows(s, c.period).find((x) => x.contribution.id === c.id);
+              if (!r) return null;
               return (
                 <tr key={c.id}>
                   <td>{periodLabel(c.period)}</td>
