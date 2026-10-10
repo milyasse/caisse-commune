@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { backupJson, configureSupabase, resetDemo, restoreJson, run, startReal, syncNow, useStore } from '../../store/store.ts';
 import { addCategory, addMember, closeMonth, reopenMonth, setMemberAmount, updateMember, updateSettings } from '../../domain/commands.ts';
 import { amountFor, contributionRows, memberStats, monthSummary } from '../../domain/finance.ts';
-import { addMonths, fmtDate, periodLabel, periodOf, periodYear, todayISO } from '../../domain/dates.ts';
+import { addMonths, fmtDate, periodLabel, periodOf, periodStart, periodYear, todayISO } from '../../domain/dates.ts';
 import { formatMAD } from '../../domain/money.ts';
 import type { Member, Period } from '../../domain/types.ts';
 import { annualReportHtml, monthlyReportHtml, operationsCsv, workbookFor } from '../../io/exports.ts';
-import { applyImport, buildPreview, guessMapping, type Grid, type Mapping, type PreviewLine } from '../../io/importer.ts';
+import { applyImport, buildPreview, earliestDate, guessMapping, norm, type Grid, type Mapping } from '../../io/importer.ts';
+import { emptyState } from '../../domain/seed.ts';
 import { readCsv, readXlsx } from '../../io/xlsx.ts';
 import { signIn } from '../../store/supabase.ts';
 import { PREVIEW, printHtml, saveFile } from '../download.ts';
@@ -364,45 +365,66 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
   const [sheets, setSheets] = useState<{ name: string; grid: Grid }[]>([]);
   const [idx, setIdx] = useState(0);
   const [mapping, setMapping] = useState<Mapping | null>(null);
-  const [lines, setLines] = useState<PreviewLine[] | null>(null);
+  const [checked, setChecked] = useState(false);
   const [withDupes, setWithDupes] = useState(false);
+  const [replaceDemo, setReplaceDemo] = useState(s.settings.isDemo);
+  const [groupName, setGroupName] = useState('Caisse commune');
   const grid = sheets[idx]?.grid ?? [];
+  const today = todayISO();
+
+  /** État sur lequel l'import s'applique : la caisse actuelle, ou une caisse vide qui démarre au 1er mois du fichier. */
+  const base = useMemo(() => {
+    if (!mapping || !replaceDemo) return s;
+    const e = emptyState(today);
+    e.settings.openingDate = '1900-01-01';
+    const first = earliestDate(buildPreview(grid, mapping, e, today));
+    e.settings.openingDate = first ? periodStart(periodOf(first)) : `${today.slice(0, 4)}-01-01`;
+    e.settings.isDemo = false;
+    return e;
+  }, [s, mapping, replaceDemo, grid, today]);
+  const lines = useMemo(() => (checked && mapping ? buildPreview(grid, mapping, base, today) : null), [checked, mapping, grid, base, today]);
 
   const load = async (file: File) => {
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
-      const sh = /\.csv$/i.test(file.name) ? [{ name: file.name, grid: readCsv(new TextDecoder().decode(buf)) }] : await readXlsx(buf);
+      const sh = /\.csv$/i.test(file.name) ? [{ name: file.name, grid: readCsv(new TextDecoder().decode(buf)) }] : (await readXlsx(buf)).filter((x) => x.grid.some((r) => r?.some((c) => c !== null && c !== undefined && c !== '')));
+      if (!sh.length) throw new Error('Le fichier ne contient aucune feuille remplie.');
       setSheets(sh);
       setIdx(0);
-      const m = guessMapping(sh[0].grid, s);
-      setMapping(m);
-      setLines(null);
+      setMapping(guessMapping(sh[0].grid, s));
+      setChecked(false);
     } catch (e) {
       toast(errorMessage(e), 'bad');
     }
   };
+  const remap = (m: Mapping) => (setMapping(m), setChecked(false));
   const header = (mapping ? grid[mapping.headerRow] : []) ?? [];
-  const colOpts = header.map((h, i) => [i, `${String.fromCharCode(65 + (i % 26))} · ${String(h ?? '').slice(0, 24)}`] as const);
+  const width = Math.max(header.length, ...grid.slice(0, 20).map((r) => r?.length ?? 0));
+  const colLabel = (i: number) => `${String.fromCharCode(65 + (i % 26))} · ${String(header[i] ?? '').slice(0, 26) || '(sans titre)'}`;
   const colSelect = (value: number | undefined, on: (v: number | undefined) => void) => (
     <select value={value ?? ''} onChange={(e) => on(e.target.value === '' ? undefined : Number(e.target.value))}>
-      <option value="">— ignorer —</option>
-      {colOpts.map(([i, l]) => (
+      <option value="">— aucune —</option>
+      {Array.from({ length: width }, (_, i) => (
         <option key={i} value={i}>
-          {l}
+          {colLabel(i)}
         </option>
       ))}
     </select>
   );
   const ok = lines?.filter((l) => !l.errors.length && (withDupes || !l.duplicate)) ?? [];
+  const newMembers = [...new Set(ok.filter((l) => l.newMember).map((l) => l.memberName!))];
+  const first = lines ? earliestDate(lines) : undefined;
+  const beforeOpening = !replaceDemo && lines?.some((l) => l.errors.some((e) => e.startsWith('Date antérieure')));
 
   const doImport = async () => {
-    if (!lines) return;
-    const c = await confirmDialog({ title: 'Importer ?', message: `${ok.length} opération(s) seront ajoutées. Les données existantes ne sont ni modifiées ni supprimées.`, confirm: 'Importer' });
-    if (c === false) return;
-    let res: ReturnType<typeof applyImport> | undefined;
+    if (!lines || !mapping) return;
+    const msg = `${ok.length} opération(s) seront ajoutées${newMembers.length ? ` et ${newMembers.length} membre(s) créé(s) (${newMembers.join(', ')})` : ''}.` + (replaceDemo ? ' Les données de démonstration seront remplacées.' : ' Les données existantes ne sont ni modifiées ni supprimées.');
+    if ((await confirmDialog({ title: 'Importer ?', message: msg, confirm: 'Importer', danger: replaceDemo })) === false) return;
     try {
+      if (replaceDemo) startReal(groupName, 0, base.settings.openingDate);
+      let res: ReturnType<typeof applyImport> | undefined;
       run((st, k) => (res = applyImport(st, k, lines, { includeDuplicates: withDupes })).state);
-      toast(`${res!.imported} opération(s) importée(s), ${res!.skipped} ignorée(s)`);
+      toast(`${res!.imported} opération(s) importée(s)${res!.membersCreated.length ? `, ${res!.membersCreated.length} membre(s) créé(s)` : ''}`);
       if (res!.errors.length) toast(`Lignes refusées : ${res!.errors.map((e) => e.row).join(', ')}`, 'bad');
       onClose();
     } catch (e) {
@@ -410,6 +432,7 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const gridMembers = mapping?.layout === 'grid' ? Object.entries(mapping.memberCols) : [];
   return (
     <Sheet title="Importer l'ancien fichier Excel" onClose={onClose} footer={lines ? <Btn full disabled={!ok.length} onClick={doImport}>Importer {ok.length} opération(s)</Btn> : undefined}>
       <label className="btn btn-soft full">
@@ -417,13 +440,16 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
         <input type="file" hidden accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={(e) => e.target.files?.[0] && load(e.target.files[0])} />
       </label>
       {!sheets.length && (
-        <p className="note">
-          Deux formats sont reconnus : <b>une ligne par mois</b> avec une colonne par membre (comme le tableau actuel), ou <b>une ligne par opération</b> (date, membre, mois, montant — ou date, catégorie, description, montant pour les dépenses). Les noms des membres doivent exister dans l'application.
-        </p>
+        <div className="note">
+          <p>
+            Formats reconnus, en-têtes en français ou en arabe : <b>une ligne par mois</b> avec une colonne par membre (feuille « المساهمات »), <b>une ligne par dépense</b> (ex. feuille « المصاريف » avec les colonnes « شهر 3, شهر 4… »), ou une ligne par versement.
+          </p>
+          <p>Depuis Google Sheets sur iPhone : ⋮ › Partager et exporter › Enregistrer sous › Excel (.xlsx), puis choisissez le fichier ici.</p>
+        </div>
       )}
       {sheets.length > 1 && (
         <Field label="Feuille">
-          <select value={idx} onChange={(e) => (setIdx(+e.target.value), setMapping(guessMapping(sheets[+e.target.value].grid, s)), setLines(null))}>
+          <select value={idx} onChange={(e) => (setIdx(+e.target.value), remap(guessMapping(sheets[+e.target.value].grid, s)))}>
             {sheets.map((sh, i) => (
               <option key={i} value={i}>
                 {sh.name}
@@ -434,13 +460,25 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
       )}
       {mapping && (
         <>
+          {s.settings.isDemo && (
+            <Card className="callout">
+              <label className="check">
+                <input type="checkbox" checked={replaceDemo} onChange={(e) => (setReplaceDemo(e.target.checked), setChecked(false))} /> Remplacer les données de démonstration par ce fichier
+              </label>
+              {replaceDemo && (
+                <Field label="Nom de la caisse">
+                  <input value={groupName} onChange={(e) => setGroupName(e.target.value)} />
+                </Field>
+              )}
+            </Card>
+          )}
           <h4>Aperçu du fichier</h4>
-          <div className="table-wrap">
+          <div className="table-wrap" dir="auto">
             <table className="grid small">
               <tbody>
-                {grid.slice(0, 8).map((r, i) => (
-                  <tr key={i} className={i === mapping.headerRow ? 'tot' : ''}>
-                    {Array.from({ length: Math.min(10, Math.max(...grid.slice(0, 8).map((x) => x?.length ?? 0))) }, (_, j) => (
+                {grid.slice(mapping.headerRow, mapping.headerRow + 7).map((r, i) => (
+                  <tr key={i} className={i === 0 ? 'tot' : ''}>
+                    {Array.from({ length: Math.min(12, width) }, (_, j) => (
                       <td key={j}>{String(r?.[j] ?? '')}</td>
                     ))}
                   </tr>
@@ -450,47 +488,92 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
           </div>
           <h4>Correspondance des colonnes</h4>
           <Field label="Disposition">
-            <select value={mapping.layout} onChange={(e) => setMapping({ ...guessMapping(grid, s), layout: e.target.value as Mapping['layout'], ...(e.target.value === 'grid' ? { periodCol: 0, memberCols: {} } : { columns: {} }) } as Mapping)}>
+            <select
+              value={mapping.layout}
+              onChange={(e) => {
+                const g = guessMapping(grid, s);
+                const v = e.target.value as Mapping['layout'];
+                remap(g.layout === v ? g : v === 'grid' ? { layout: 'grid', headerRow: g.headerRow, periodCol: 0, memberCols: {} } : ({ layout: v, headerRow: g.headerRow, columns: {} } as Mapping));
+              }}
+            >
               <option value="grid">Une ligne par mois, une colonne par membre</option>
               <option value="payments">Une ligne par versement</option>
               <option value="expenses">Une ligne par dépense</option>
             </select>
           </Field>
-          <Field label="Ligne d'en-tête">
-            <input type="number" min={1} value={mapping.headerRow + 1} onChange={(e) => setMapping({ ...mapping, headerRow: Math.max(0, +e.target.value - 1) })} />
+          <Field label="Ligne des titres de colonnes">
+            <input type="number" inputMode="numeric" min={1} value={mapping.headerRow + 1} onChange={(e) => remap({ ...mapping, headerRow: Math.max(0, +e.target.value - 1) })} />
           </Field>
           {mapping.layout === 'grid' && (
             <>
-              <Field label="Colonne « Mois »">{colSelect(mapping.periodCol, (v) => setMapping({ ...mapping, periodCol: v ?? 0 }))}</Field>
-              <Field label="Colonne « Date de versement » (sinon fin de mois)">{colSelect(mapping.dateCol, (v) => setMapping({ ...mapping, dateCol: v }))}</Field>
-              <Field label="Colonne « Dépenses du mois »">{colSelect(mapping.expenseCol, (v) => setMapping({ ...mapping, expenseCol: v }))}</Field>
-              {s.members.map((m) => {
-                const col = Object.entries(mapping.memberCols).find(([, n]) => n === m.name)?.[0];
+              <div className="two">
+                <Field label="Année">{colSelect(mapping.yearCol, (v) => remap({ ...mapping, yearCol: v }))}</Field>
+                <Field label="Mois">{colSelect(mapping.periodCol, (v) => remap({ ...mapping, periodCol: v ?? 0 }))}</Field>
+              </div>
+              <Field label="Date de versement (sinon fin du mois)">{colSelect(mapping.dateCol, (v) => remap({ ...mapping, dateCol: v }))}</Field>
+              <Field label="Dépenses du mois" hint="Laissez « aucune » si vous importez la feuille détaillée des dépenses, pour ne pas compter deux fois.">
+                {colSelect(mapping.expenseCol, (v) => remap({ ...mapping, expenseCol: v }))}
+              </Field>
+              <h4>Membres</h4>
+              {gridMembers.map(([col, name]) => {
+                const existing = base.members.find((m) => norm(m.name) === norm(name));
+                const headerName = String(header[+col] ?? '').trim() || name;
                 return (
-                  <Field key={m.id} label={`Colonne de ${m.name}`}>
-                    {colSelect(col === undefined ? undefined : +col, (v) => {
-                      const mc = Object.fromEntries(Object.entries(mapping.memberCols).filter(([, n]) => n !== m.name));
-                      if (v !== undefined) mc[v] = m.name;
-                      setMapping({ ...mapping, memberCols: mc });
-                    })}
+                  <Field key={col} label={`Colonne ${colLabel(+col)}`}>
+                    <select
+                      value={existing ? existing.name : '__new__'}
+                      onChange={(e) => {
+                        const mc = { ...mapping.memberCols };
+                        if (e.target.value === '__skip__') delete mc[+col];
+                        else mc[+col] = e.target.value === '__new__' ? headerName : e.target.value;
+                        remap({ ...mapping, memberCols: mc });
+                      }}
+                    >
+                      <option value="__new__">Nouveau membre « {headerName} »</option>
+                      {base.members.map((m) => (
+                        <option key={m.id} value={m.name}>
+                          {m.name}
+                        </option>
+                      ))}
+                      <option value="__skip__">Ignorer cette colonne</option>
+                    </select>
                   </Field>
                 );
               })}
+              <Field label="Ajouter une colonne membre">
+                <select
+                  value=""
+                  onChange={(e) => e.target.value !== '' && remap({ ...mapping, memberCols: { ...mapping.memberCols, [+e.target.value]: String(header[+e.target.value] ?? '').trim() || `Membre ${+e.target.value + 1}` } })}
+                >
+                  <option value="">—</option>
+                  {Array.from({ length: width }, (_, i) => i)
+                    .filter((i) => mapping.memberCols[i] === undefined)
+                    .map((i) => (
+                      <option key={i} value={i}>
+                        {colLabel(i)}
+                      </option>
+                    ))}
+                </select>
+              </Field>
             </>
           )}
           {mapping.layout === 'payments' &&
             (['date', 'member', 'period', 'amount', 'comment'] as const).map((k) => (
               <Field key={k} label={{ date: 'Date du versement', member: 'Membre', period: 'Mois concerné', amount: 'Montant', comment: 'Commentaire' }[k]}>
-                {colSelect(mapping.columns[k], (v) => setMapping({ ...mapping, columns: { ...mapping.columns, [k]: v } }))}
+                {colSelect(mapping.columns[k], (v) => remap({ ...mapping, columns: { ...mapping.columns, [k]: v } }))}
               </Field>
             ))}
-          {mapping.layout === 'expenses' &&
-            (['date', 'category', 'description', 'beneficiary', 'amount', 'comment'] as const).map((k) => (
-              <Field key={k} label={{ date: 'Date', category: 'Catégorie', description: 'Description', beneficiary: 'Bénéficiaire', amount: 'Montant', comment: 'Commentaire' }[k]}>
-                {colSelect(mapping.columns[k], (v) => setMapping({ ...mapping, columns: { ...mapping.columns, [k]: v } }))}
-              </Field>
-            ))}
-          <Btn kind="soft" full onClick={() => setLines(buildPreview(grid, mapping, s, todayISO()))}>
+          {mapping.layout === 'expenses' && (
+            <>
+              {mapping.amountCols?.length ? <p className="note">Montant lu dans les colonnes {mapping.amountCols.map((c) => String(header[c] ?? '')).join(', ')}.</p> : null}
+              {(['date', 'description', 'payer', 'category', 'beneficiary', ...(mapping.amountCols?.length ? [] : ['amount']), 'comment'] as const).map((k) => (
+                <Field key={k} label={{ date: 'Date du paiement', category: 'Catégorie', description: 'Description', beneficiary: 'Bénéficiaire', amount: 'Montant', comment: 'Commentaire', payer: 'Payé par' }[k as string] ?? k}>
+                  {colSelect(mapping.columns[k as keyof typeof mapping.columns], (v) => remap({ ...mapping, columns: { ...mapping.columns, [k]: v } }))}
+                </Field>
+              ))}
+            </>
+          )}
+          <Btn kind="soft" full onClick={() => setChecked(true)}>
             Contrôler les données
           </Btn>
         </>
@@ -512,6 +595,16 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
               <b className="t-neg">{lines.filter((l) => l.errors.length).length}</b>
             </div>
           </div>
+          {replaceDemo && first && <p className="note">Nouvelle caisse « {groupName} » : solde initial 0,00 MAD au {fmtDate(base.settings.openingDate)}. Vous pourrez le modifier dans Paramètres › Caisse et solde initial.</p>}
+          {newMembers.length > 0 && <p className="note">Membres créés : {newMembers.join(', ')}. Vous pourrez les renommer ensuite sans perdre l'historique.</p>}
+          {beforeOpening && first && (
+            <Card className="callout">
+              <p>Le fichier commence le {fmtDate(first)}, avant le solde initial de la caisse ({fmtDate(s.settings.openingDate)}).</p>
+              <Btn kind="soft" onClick={() => tryRun((x, k) => updateSettings(x, k, { openingDate: periodStart(periodOf(first)) }), 'Date du solde initial déplacée')}>
+                Démarrer la caisse au {fmtDate(periodStart(periodOf(first)))}
+              </Btn>
+            </Card>
+          )}
           <label className="check">
             <input type="checkbox" checked={withDupes} onChange={(e) => setWithDupes(e.target.checked)} /> Importer aussi les doublons potentiels
           </label>
@@ -533,9 +626,9 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
                     <td>{l.row}</td>
                     <td>{l.kind === 'payment' ? 'Cotis.' : 'Dépense'}</td>
                     <td>{fmtDate(l.date)}</td>
-                    <td>{l.kind === 'payment' ? `${l.memberName ?? ''} ${l.period ? '· ' + l.period : ''}` : l.description}</td>
+                    <td dir="auto">{l.kind === 'payment' ? `${l.memberName ?? ''} ${l.period ? '· ' + l.period : ''}` : l.description}</td>
                     <td className="n">{l.amount !== undefined ? formatMAD(l.amount, false) : ''}</td>
-                    <td>{[...l.errors, ...l.warnings].join(' ; ') || 'OK'}</td>
+                    <td className="wrap">{[...l.errors, ...l.warnings.filter((w) => !w.startsWith('Nouveau membre'))].join(' ; ') || 'OK'}</td>
                   </tr>
                 ))}
               </tbody>

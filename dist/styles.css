@@ -268,3 +268,6 @@ details.more summary { cursor: pointer; color: var(--green); font-weight: 600; f
   html, body { overscroll-behavior-y: none; }
   .tabs button, .fab, .chip, .seg button { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
 }
+
+table.grid td.wrap { white-space: normal; min-width: 180px; }
+.note p { margin: 0 0 6px; }

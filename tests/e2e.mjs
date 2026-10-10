@@ -111,6 +111,7 @@ const csv = 'Date;Membre;Mois;Montant\n' + '10/10/2026;Ahmed;10/2026;50\n'.repea
 writeFileSync(`${out}/import.csv`, csv);
 await page.click('text=Importer l’ancien fichier Excel');
 await page.setInputFiles('.sheet input[type=file]', `${out}/import.csv`);
+await page.uncheck('.sheet .callout input[type=checkbox]'); // on garde la démo pour ce contrôle
 await page.click('text=Contrôler les données');
 await page.waitForSelector('text=Doublons');
 await page.screenshot({ path: `${out}/9-import.png`, fullPage: false });
@@ -123,6 +124,27 @@ await page.goto(URL + '#accueil'); await page.reload();
 await page.waitForSelector('.hero-v');
 const b2 = await balance();
 check(`Données conservées après rechargement, solde ${b2}`, num(b2) === num(b0) + 150); // dépense annulée
+
+// Import du fichier réel (reconstitué) en remplaçant la démonstration
+await page.click('nav.tabs >> text=Paramètres');
+await page.click('text=Importer l\u2019ancien fichier Excel');
+await page.setInputFiles('.sheet input[type=file]', import.meta.dirname + '/fixtures/fichier-reel-reconstitue.xlsx');
+check('Feuille « المساهمات » proposée en premier', (await page.inputValue('.sheet select >> nth=0')) === '0');
+await page.click('text=Contrôler les données');
+await page.waitForSelector('text=Membres créés');
+await page.screenshot({ path: `${out}/10-import-reel.png` });
+const k2 = await page.locator('.sheet .kpis .mini b').allTextContents();
+check(`Fichier réel : valides/doublons/erreurs = ${k2.join('/')}`, k2.join('/') === '97/0/0');
+await page.click('.sheet-f button');
+await page.click('.dialog .btn-danger');
+await page.waitForSelector('.toast >> text=97 opération(s) importée(s)');
+await page.click('nav.tabs >> text=Accueil');
+const b3 = await balance();
+check(`Après import du fichier réel : solde ${b3} (fichier : 1 600,00)`, num(b3) === 1600);
+check('Bandeau démo retiré', !(await page.isVisible('.demo-banner >> text=Données fictives')));
+await page.screenshot({ path: `${out}/11-accueil-reel.png`, fullPage: true });
+await page.click('nav.tabs >> text=Cotisations');
+await page.screenshot({ path: `${out}/12-cotisations-reel.png`, fullPage: true });
 check('Aucune erreur JavaScript', errors.length === 0);
 if (errors.length) console.log(errors.join('\n'));
 await browser.close();
