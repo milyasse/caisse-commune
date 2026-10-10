@@ -1,0 +1,32 @@
+{
+  "name": "caisse-commune",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Gestion des cotisations mensuelles et des dépenses communes (PWA hors ligne, MAD).",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "build": "sh scripts/build.sh",
+    "dev": "sh scripts/build.sh && npx serve dist -l 8765",
+    "test": "node --test tests/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.ui.json",
+    "e2e": "node tests/e2e.mjs shots",
+    "db:test": "sh db/test/run_tests.sh",
+    "db:seed": "node scripts/gen-seed-sql.ts",
+    "icons": "node scripts/icons.mjs"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.50.0",
+    "serve": "^14.2.0",
+    "sharp": "^0.34.0",
+    "typescript": "^5.8.0"
+  }
+}

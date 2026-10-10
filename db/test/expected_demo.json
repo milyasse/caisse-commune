@@ -1,0 +1,92 @@
+[
+ {
+  "period": "2026-01-01",
+  "opening": "1500.00",
+  "expected": "1600.00",
+  "received": "1200.00",
+  "expenses": "1380.00",
+  "closing": "1320.00",
+  "remaining": "0.00"
+ },
+ {
+  "period": "2026-02-01",
+  "opening": "1320.00",
+  "expected": "1600.00",
+  "received": "1600.00",
+  "expenses": "1385.00",
+  "closing": "1535.00",
+  "remaining": "0.00"
+ },
+ {
+  "period": "2026-03-01",
+  "opening": "1535.00",
+  "expected": "1800.00",
+  "received": "1800.00",
+  "expenses": "1390.00",
+  "closing": "1945.00",
+  "remaining": "0.00"
+ },
+ {
+  "period": "2026-04-01",
+  "opening": "1945.00",
+  "expected": "1600.00",
+  "received": "1600.00",
+  "expenses": "1395.00",
+  "closing": "2150.00",
+  "remaining": "0.00"
+ },
+ {
+  "period": "2026-05-01",
+  "opening": "2150.00",
+  "expected": "1600.00",
+  "received": "1600.00",
+  "expenses": "2050.00",
+  "closing": "1700.00",
+  "remaining": "0.00"
+ },
+ {
+  "period": "2026-06-01",
+  "opening": "1700.00",
+  "expected": "1800.00",
+  "received": "1800.00",
+  "expenses": "1405.00",
+  "closing": "2095.00",
+  "remaining": "400.00"
+ },
+ {
+  "period": "2026-07-01",
+  "opening": "2095.00",
+  "expected": "1800.00",
+  "received": "1250.00",
+  "expenses": "1410.00",
+  "closing": "1935.00",
+  "remaining": "150.00"
+ },
+ {
+  "period": "2026-08-01",
+  "opening": "1935.00",
+  "expected": "1800.00",
+  "received": "1800.00",
+  "expenses": "1735.00",
+  "closing": "2000.00",
+  "remaining": "0.00"
+ },
+ {
+  "period": "2026-09-01",
+  "opening": "2000.00",
+  "expected": "1800.00",
+  "received": "1800.00",
+  "expenses": "2920.00",
+  "closing": "880.00",
+  "remaining": "0.00"
+ },
+ {
+  "period": "2026-10-01",
+  "opening": "880.00",
+  "expected": "1800.00",
+  "received": "1000.00",
+  "expenses": "1200.00",
+  "closing": "680.00",
+  "remaining": "1200.00"
+ }
+]
