@@ -14,9 +14,11 @@
     <link rel="icon" href="icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="modulepreload" href="app.js" />
+    <style>#boot{position:fixed;inset:0;display:grid;place-items:center;background:#f4f7f5}#boot i{width:34px;height:34px;border-radius:50%;border:4px solid #cfe3d6;border-top-color:#17633d;animation:r .8s linear infinite}@keyframes r{to{transform:rotate(1turn)}}</style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div id="boot" aria-label="Chargement"><i></i></div></div>
     <noscript>Activez JavaScript pour utiliser l'application.</noscript>
     <script type="module" src="app.js"></script>
   </body>
