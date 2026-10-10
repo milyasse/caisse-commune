@@ -115,6 +115,8 @@ export interface Settings {
   isDemo: boolean;
   currentUser: string;
   currentRole: Role;
+  /** Empreinte SHA-256 du code qui protège les actions destructrices (vider, réinitialiser). */
+  pinHash?: string;
   updatedAt: string;
 }
 

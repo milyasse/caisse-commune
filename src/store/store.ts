@@ -133,6 +133,11 @@ export function run(fn: (s: AppState, c: Ctx) => AppState): void {
 export function replaceState(next: AppState, reason: 'reset' | 'restore') {
   const now = new Date().toISOString();
   next = structuredClone(next);
+  // Le code de protection et l'utilisateur de l'appareil survivent à une réinitialisation
+  if (reason === 'reset') {
+    next.settings.pinHash = snap.state.settings.pinHash;
+    next.settings.currentUser = snap.state.settings.currentUser;
+  }
   next.audit.push({ id: crypto.randomUUID(), at: now, user: snap.state.settings.currentUser, action: reason, entity: 'state', entityId: 'all', reason: reason === 'reset' ? 'Réinitialisation' : 'Restauration de sauvegarde' });
   set({ state: autoGenerate(next), sync: emptyMeta() });
   void persist();
@@ -141,6 +146,20 @@ export function replaceState(next: AppState, reason: 'reset' | 'restore') {
 export function resetDemo() {
   replaceState(demoState(), 'reset');
 }
+/** Vide toutes les données de l'appareil (caisse réelle vide, sans démonstration). */
+export function clearAll() {
+  const s = emptyState();
+  s.settings.groupName = snap.state.settings.isDemo ? 'Caisse commune' : snap.state.settings.groupName;
+  replaceState(s, 'reset');
+}
+
+/** Empreinte du code de protection (SHA-256, jamais stocké en clair). */
+export async function hashPin(pin: string): Promise<string> {
+  const data = new TextEncoder().encode(`caisse-commune:${pin.trim()}`);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export function startReal(groupName: string, openingBalance: number, openingDate: string) {
   const s = emptyState();
   s.settings.groupName = groupName || 'Caisse commune';

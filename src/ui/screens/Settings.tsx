@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { backupJson, configureSupabase, resetDemo, restoreJson, run, startReal, syncNow, useStore } from '../../store/store.ts';
+import { backupJson, clearAll, configureSupabase, hashPin, resetDemo, restoreJson, run, startReal, syncNow, useStore } from '../../store/store.ts';
 import { addCategory, addMember, closeMonth, reopenMonth, setMemberAmount, updateMember, updateSettings } from '../../domain/commands.ts';
 import { amountFor, contributionRows, memberStats, monthSummary } from '../../domain/finance.ts';
 import { addMonths, fmtDate, periodLabel, periodOf, periodStart, periodYear, todayISO } from '../../domain/dates.ts';
@@ -47,7 +47,7 @@ export function Settings({ period }: { period: Period }) {
           </button>
         ))}
       </div>
-      <p className="note">Caisse commune · version 0.4 · montants en MAD · dates JJ/MM/AAAA</p>
+      <p className="note">Caisse commune · version 0.5 · montants en MAD · dates JJ/MM/AAAA</p>
       {panel === 'membres' && <MembersPanel onClose={() => setPanel(null)} period={period} />}
       {panel === 'groupe' && <GroupPanel onClose={() => setPanel(null)} />}
       {panel === 'cloture' && <ClosurePanel onClose={() => setPanel(null)} />}
@@ -367,8 +367,9 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
   const [mapping, setMapping] = useState<Mapping | null>(null);
   const [checked, setChecked] = useState(false);
   const [withDupes, setWithDupes] = useState(false);
-  const [replaceDemo, setReplaceDemo] = useState(s.settings.isDemo);
-  const [groupName, setGroupName] = useState('Caisse commune');
+  const isFresh = s.settings.isDemo || (s.members.length === 0 && s.payments.length === 0 && s.expenses.length === 0);
+  const [replaceDemo, setReplaceDemo] = useState(isFresh);
+  const [groupName, setGroupName] = useState(s.settings.isDemo ? 'Caisse commune' : s.settings.groupName);
   const grid = sheets[idx]?.grid ?? [];
   const today = todayISO();
 
@@ -418,7 +419,7 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
 
   const doImport = async () => {
     if (!lines || !mapping) return;
-    const msg = `${ok.length} opération(s) seront ajoutées${newMembers.length ? ` et ${newMembers.length} membre(s) créé(s) (${newMembers.join(', ')})` : ''}.` + (replaceDemo ? ' Les données de démonstration seront remplacées.' : ' Les données existantes ne sont ni modifiées ni supprimées.');
+    const msg = `${ok.length} opération(s) seront ajoutées${newMembers.length ? ` et ${newMembers.length} membre(s) créé(s) (${newMembers.join(', ')})` : ''}.` + (replaceDemo ? (s.settings.isDemo ? ' Les données de démonstration seront remplacées.' : '') : ' Les données existantes ne sont ni modifiées ni supprimées.');
     if ((await confirmDialog({ title: 'Importer ?', message: msg, confirm: 'Importer', danger: replaceDemo })) === false) return;
     try {
       if (replaceDemo) startReal(groupName, 0, base.settings.openingDate);
@@ -460,10 +461,11 @@ function ImportPanel({ onClose }: { onClose: () => void }) {
       )}
       {mapping && (
         <>
-          {s.settings.isDemo && (
+          {isFresh && (
             <Card className="callout">
               <label className="check">
-                <input type="checkbox" checked={replaceDemo} onChange={(e) => (setReplaceDemo(e.target.checked), setChecked(false))} /> Remplacer les données de démonstration par ce fichier
+                <input type="checkbox" checked={replaceDemo} onChange={(e) => (setReplaceDemo(e.target.checked), setChecked(false))} />{' '}
+                {s.settings.isDemo ? 'Remplacer les données de démonstration par ce fichier' : 'Démarrer la caisse au premier mois du fichier'}
               </label>
               {replaceDemo && (
                 <Field label="Nom de la caisse">
@@ -661,23 +663,78 @@ function CategoryPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ---------------------------------------------------------------- Code de protection
+type Guarded = { title: string; message: string; confirm: string; action: () => void };
+
+/** Demande le code de protection (ou le fait créer la première fois) avant une action destructrice. */
+function PinDialog({ req, onClose }: { req: Guarded; onClose: () => void }) {
+  const { state: s } = useStore();
+  const creating = !s.settings.pinHash;
+  const [pin, setPin] = useState('');
+  const [pin2, setPin2] = useState('');
+  const [err, setErr] = useState('');
+  const valid = creating ? pin.trim().length >= 4 && pin === pin2 : pin.trim().length > 0;
+  const submit = async () => {
+    try {
+      const h = await hashPin(pin);
+      if (creating) run((x, k) => updateSettings(x, k, { pinHash: h }));
+      else if (h !== s.settings.pinHash) return setErr('Code incorrect.');
+      req.action();
+      onClose();
+    } catch (e) {
+      setErr(errorMessage(e));
+    }
+  };
+  return (
+    <div className="sheet-bg center" onClick={onClose}>
+      <form className="dialog" role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onSubmit={(e) => (e.preventDefault(), void submit())}>
+        <h2>{req.title}</h2>
+        <p>{req.message}</p>
+        {creating && <p className="note">Première utilisation : choisissez un code d'au moins 4 caractères. Il sera demandé avant chaque action qui efface des données. Notez-le : il ne peut pas être retrouvé.</p>}
+        <Field label={creating ? 'Nouveau code' : 'Code de protection'} error={err || undefined}>
+          <input id="pin" type="password" inputMode="numeric" autoComplete="off" autoFocus value={pin} onChange={(e) => (setPin(e.target.value), setErr(''))} />
+        </Field>
+        {creating && (
+          <Field label="Confirmer le code" error={pin2 && pin !== pin2 ? 'Les deux codes sont différents.' : undefined}>
+            <input id="pin2" type="password" inputMode="numeric" autoComplete="off" value={pin2} onChange={(e) => setPin2(e.target.value)} />
+          </Field>
+        )}
+        <div className="row-end">
+          <Btn kind="ghost" onClick={onClose}>
+            Annuler
+          </Btn>
+          <Btn kind="danger" type="submit" disabled={!valid}>
+            {req.confirm}
+          </Btn>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- Sauvegarde
 function BackupPanel({ onClose }: { onClose: () => void }) {
   const { state: s } = useStore();
   const [name, setName] = useState('Caisse commune');
   const [bal, setBal] = useState<number | null>(0);
   const [date, setDate] = useState(todayISO().slice(0, 8) + '01');
-  const restore = async (file: File) => {
-    const ok = await confirmDialog({ title: 'Restaurer cette sauvegarde ?', message: 'Les données actuelles de cet appareil seront remplacées par celles du fichier. Pensez à sauvegarder avant.', confirm: 'Restaurer', danger: true });
-    if (ok === false) return;
-    try {
-      restoreJson(await file.text());
-      toast('Sauvegarde restaurée');
-      onClose();
-    } catch (e) {
-      toast(errorMessage(e), 'bad');
-    }
-  };
+  const [guard, setGuard] = useState<Guarded | null>(null);
+  const counts = `${s.members.length} membre(s), ${s.payments.length} versement(s), ${s.expenses.length} dépense(s)`;
+  const restore = (file: File) =>
+    setGuard({
+      title: 'Restaurer cette sauvegarde ?',
+      message: `Les données actuelles de cet appareil (${counts}) seront remplacées par celles du fichier.`,
+      confirm: 'Restaurer',
+      action: async () => {
+        try {
+          restoreJson(await file.text());
+          toast('Sauvegarde restaurée');
+          onClose();
+        } catch (e) {
+          toast(errorMessage(e), 'bad');
+        }
+      },
+    });
   const real = async () => {
     const ok = await confirmDialog({ title: 'Commencer avec des données réelles ?', message: 'Les données de démonstration seront effacées de cet appareil. Vous pourrez ensuite ajouter vos membres ou importer votre fichier Excel.', confirm: 'Commencer', danger: true });
     if (ok !== false) startReal(name, bal ?? 0, date), toast('Caisse réelle créée'), onClose();
@@ -685,7 +742,7 @@ function BackupPanel({ onClose }: { onClose: () => void }) {
   return (
     <Sheet title="Sauvegarde et données" onClose={onClose}>
       <p>
-        Données actuelles : {s.settings.isDemo ? <Badge tone="warn">démonstration (fictives)</Badge> : <Badge tone="ok">réelles</Badge>}
+        Données actuelles : {s.settings.isDemo ? <Badge tone="warn">démonstration (fictives)</Badge> : <Badge tone="ok">réelles</Badge>} <span className="small muted">{counts}</span>
       </p>
       <h4>Sauvegarde</h4>
       <div className="row-gap wrap">
@@ -715,16 +772,36 @@ function BackupPanel({ onClose }: { onClose: () => void }) {
           <Btn onClick={real}>Commencer avec mes données</Btn>
         </>
       ) : null}
+      <h4>Vider les données</h4>
+      <p className="note">Efface tout ce qui est sur cet appareil ({counts}) pour repartir d'une caisse vide, par exemple avant de refaire un import. Un code de protection est demandé.</p>
+      <Btn
+        kind="danger"
+        onClick={() =>
+          setGuard({
+            title: 'Vider toutes les données ?',
+            message: `${counts} seront définitivement effacés de cet appareil. Téléchargez une sauvegarde avant si vous voulez pouvoir revenir en arrière.`,
+            confirm: 'Vider les données',
+            action: () => (clearAll(), toast('Données vidées : la caisse est vide'), onClose()),
+          })
+        }
+      >
+        <Icon name="ban" /> Vider toutes les données
+      </Btn>
       <h4>Démonstration</h4>
       <Btn
         kind="ghost"
-        onClick={async () => {
-          const ok = await confirmDialog({ title: 'Recharger la démonstration ?', message: 'Toutes les données de cet appareil seront remplacées par les données fictives.', confirm: 'Recharger', danger: true });
-          if (ok !== false) resetDemo(), toast('Démonstration réinitialisée'), onClose();
-        }}
+        onClick={() =>
+          setGuard({
+            title: 'Recharger la démonstration ?',
+            message: 'Toutes les données de cet appareil seront remplacées par les données fictives.',
+            confirm: 'Recharger',
+            action: () => (resetDemo(), toast('Démonstration réinitialisée'), onClose()),
+          })
+        }
       >
         Réinitialiser les données de démonstration
       </Btn>
+      {guard && <PinDialog req={guard} onClose={() => setGuard(null)} />}
     </Sheet>
   );
 }
